@@ -354,7 +354,9 @@ app.get("/kiemtra", async (req, res) => {
     fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, opts).then((r) => r.json());
   const out = {};
   if (req.query.dangky) out.dang_ky_lai = await g("me/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_echoes,standby,messaging_handovers", { method: "POST" });
-  out.trang = await g("me?fields=id");
+  // debug_token cho biết mã này thuộc trang nào (profile_id) mà không cần quyền đọc trang; chỉ trả ID, không trả mã
+  const d = (await g(`debug_token?input_token=${PAGE_ACCESS_TOKEN}`)).data ?? {};
+  out.trang = { id_trang: d.profile_id, ung_dung: d.app_id, loai_ma: d.type, hop_le: d.is_valid, quyen: d.scopes };
   out.ung_dung_dang_ky = await g("me/subscribed_apps");
   res.json(out);
 });
