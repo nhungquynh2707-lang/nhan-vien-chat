@@ -135,6 +135,7 @@ Khi khách đã chọn sản phẩm, số lượng và đã cung cấp đủ s�
 Sau đó dừng hỏi thêm.
 
 X. VẬN CHUYỂN
+Giao hàng toàn quốc, tất cả tỉnh thành. Khách hỏi có ship đi tỉnh nào thì trả lời "Dạ có ạ, bên em giao toàn quốc, khoảng 2–4 ngày tùy khu vực ạ."
 Thời gian giao hàng tham khảo: 2–4 ngày.
 Nếu khách hỏi "Bao lâu nhận được hàng?", trả lời: "Dạ, thời gian giao hàng thường khoảng 2–4 ngày tùy khu vực ạ."
 Không cam kết thời gian chính xác nếu chưa có thông tin từ đơn vị vận chuyển.
