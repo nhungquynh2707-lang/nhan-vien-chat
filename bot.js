@@ -180,6 +180,8 @@ async function reply(id, customerText, send = sendFb) {
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
   u.lastActive = Date.now();
   const messages = u.history;
+  // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
+  if (!messages.length) u.ctx = u.khach ? khachQuen(u.khach) : null;
   messages.push({ role: "user", content: customerText });
 
   for (let step = 0; step < 5; step++) {
@@ -188,7 +190,7 @@ async function reply(id, customerText, send = sendFb) {
       max_tokens: 1024,
       output_config: { effort: "medium" },
       cache_control: { type: "ephemeral" },
-      system: u.khach ? [{ type: "text", text: SYSTEM }, { type: "text", text: khachQuen(u.khach) }] : SYSTEM,
+      system: u.ctx ? [{ type: "text", text: SYSTEM }, { type: "text", text: u.ctx }] : SYSTEM,
       tools: TOOLS,
       messages,
     });
