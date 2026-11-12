@@ -36,6 +36,8 @@ const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
 let state = { users: {} };
 try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
+// Đặt biến XOA_TAM_DUNG=1 trên Railway để bỏ mọi lệnh tạm dừng (dùng khi thử nghiệm), rồi xóa biến đi
+if (process.env.XOA_TAM_DUNG) for (const u of Object.values(state.users)) u.pausedUntil = 0;
 let saveTimer;
 function saveState() {
   clearTimeout(saveTimer);
