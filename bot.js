@@ -358,7 +358,8 @@ app.post("/webhook", (req, res) => {
       else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
     }
     // Tin "dự bị": ứng dụng khác đang giữ quyền nhận tin chính. Giành quyền rồi mới trả lời.
-    for (const ev of entry.standby ?? []) {
+    // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
+    for (const ev of process.env.GIANH_QUYEN ? entry.standby ?? [] : []) {
       const msg = ev.message;
       if (!msg || msg.is_echo || !ev.sender?.id) continue;
       takeThread(ev.sender.id, msg.text || "[Khách gửi một hình ảnh hoặc tệp]");
