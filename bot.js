@@ -1,0 +1,289 @@
+// Nhân viên chat AI cho fanpage Facebook Messenger, dùng Claude Haiku 5.5.
+// Chạy: node --env-file=.env bot.js
+import crypto from "node:crypto";
+import fs from "node:fs";
+import express from "express";
+import Anthropic from "@anthropic-ai/sdk";
+
+const {
+  PAGE_ACCESS_TOKEN,
+  APP_SECRET,
+  VERIFY_TOKEN,
+  PORT = "3000",
+  MODEL = "claude-haiku-5-5",
+  SHIP_FEE = "30000",
+  FREE_SHIP_FROM = "500000",
+  PAUSE_HOURS = "12",
+  GRAPH_VERSION = "v21.0",
+} = process.env;
+
+for (const [k, v] of Object.entries({ VERIFY_TOKEN, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY })) {
+  if (!v) { console.error(`Thiếu biến ${k} (đặt trong Variables của Railway hoặc file .env)`); process.exit(1); }
+}
+if (!PAGE_ACCESS_TOKEN || !APP_SECRET) console.warn("Chưa có PAGE_ACCESS_TOKEN / APP_SECRET: chưa nhận tin từ fanpage, chỉ dùng được trang /thu");
+
+const client = new Anthropic();
+const SHOP_INFO = fs.readFileSync(new URL("./shop.txt", import.meta.url), "utf8");
+const STATE_FILE = new URL("./state.json", import.meta.url);
+const BOT_TAG = "ai-bot"; // gắn vào tin AI gửi để phân biệt với tin người thật gửi
+const DEBOUNCE_MS = 2500; // gom các tin khách gửi liên tiếp thành một lượt
+const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt đầu cuộc chat mới
+const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
+
+// ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
+let state = { users: {} };
+try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
+let saveTimer;
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => fs.writeFile(STATE_FILE, JSON.stringify(state), () => {}), 1000);
+}
+function user(id) {
+  return (state.users[id] ??= { history: [], pausedUntil: 0, lastActive: 0 });
+}
+function pause(id, reason) {
+  const u = user(id);
+  u.pausedUntil = Date.now() + PAUSE_MS;
+  u.history = []; // khi AI quay lại sẽ bắt đầu cuộc chat mới
+  saveState();
+  console.log(`[tạm dừng AI] khách ${id}: ${reason}`);
+}
+
+// ---------- Hướng dẫn cho nhân viên AI ----------
+const SYSTEM = `Bạn là nhân viên chăm sóc khách hàng của cửa hàng dưới đây, trả lời tin nhắn Facebook Messenger bằng tiếng Việt.
+
+Phong cách: thân thiện, lễ phép, xưng "em", gọi khách là "chị" (hoặc "anh" nếu khách xưng vậy). Câu ngắn như nhắn tin, tối đa 3–4 câu, có thể dùng 1 emoji. Không dùng markdown (không **, không #), không gạch đầu dòng dài.
+
+Nhiệm vụ: tư vấn sản phẩm, gợi ý size theo cân nặng, báo giá, khéo léo dẫn tới chốt đơn. Khi khách muốn mua, xin lần lượt thông tin còn thiếu (họ tên, số điện thoại, địa chỉ, sản phẩm, size, màu, số lượng). Nếu sản phẩm không có màu để chọn thì không hỏi màu.
+
+Tính tiền: LUÔN gọi công cụ tinh_tong_don để tính tổng, không tự cộng nhẩm. Khi đủ thông tin, tóm tắt đơn gồm: sản phẩm, size, màu, số lượng, tạm tính, phí ship, tổng cộng, họ tên, số điện thoại, địa chỉ. Hỏi khách xác nhận. Khi khách xác nhận, cảm ơn và báo shop sẽ gọi xác nhận và giao hàng.
+
+Chuyển cho nhân viên thật: gọi công cụ chuyen_nhan_vien khi khách muốn gặp người thật / nhân viên / chủ shop, khi khách khiếu nại, phàn nàn, báo hàng lỗi, muốn đổi trả hoặc hoàn tiền, hoặc khi bạn không trả lời được. Trước khi gọi, nhắn một câu ngắn báo khách đợi nhân viên một chút.
+
+Chỉ dùng thông tin cửa hàng dưới đây. Không bịa sản phẩm, giá, màu, size hay chính sách. Nếu không có thông tin, nói sẽ kiểm tra lại và chuyển nhân viên.
+
+THÔNG TIN CỬA HÀNG:
+${SHOP_INFO}`;
+
+const TOOLS = [
+  {
+    name: "tinh_tong_don",
+    description: "Tính tạm tính, phí ship và tổng tiền của đơn hàng. Gọi mỗi khi cần báo tổng tiền cho khách.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["items"],
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["ten", "so_luong", "don_gia"],
+            properties: {
+              ten: { type: "string", description: "Tên sản phẩm" },
+              so_luong: { type: "integer", description: "Số lượng" },
+              don_gia: { type: "integer", description: "Đơn giá đang bán (đồng), ví dụ 319000" },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "chuyen_nhan_vien",
+    description: "Chuyển cuộc trò chuyện cho nhân viên thật. Sau khi gọi, AI ngừng trả lời khách này.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["ly_do"],
+      properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
+    },
+  },
+];
+
+const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
+function tinhTongDon({ items }) {
+  const tamTinh = items.reduce((s, it) => s + it.so_luong * it.don_gia, 0);
+  const ship = tamTinh >= Number(FREE_SHIP_FROM) ? 0 : Number(SHIP_FEE);
+  return {
+    chi_tiet: items.map((it) => `${it.ten} x${it.so_luong} = ${vnd(it.so_luong * it.don_gia)}`),
+    tam_tinh: vnd(tamTinh),
+    phi_ship: ship ? vnd(ship) : "Miễn phí",
+    tong_cong: vnd(tamTinh + ship),
+  };
+}
+
+// ---------- Gọi Claude ----------
+const HANDOFF_TEXT = "Dạ chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
+
+async function reply(id, customerText, send = sendFb) {
+  const u = user(id);
+  if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
+  u.lastActive = Date.now();
+  const messages = u.history;
+  messages.push({ role: "user", content: customerText });
+
+  for (let step = 0; step < 5; step++) {
+    const res = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      output_config: { effort: "low" },
+      cache_control: { type: "ephemeral" },
+      system: SYSTEM,
+      tools: TOOLS,
+      messages,
+    });
+    messages.push({ role: "assistant", content: res.content });
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+
+    if (res.stop_reason === "refusal") {
+      await send(id, HANDOFF_TEXT);
+      return pause(id, "AI từ chối trả lời");
+    }
+    const calls = res.content.filter((b) => b.type === "tool_use");
+    if (!calls.length) {
+      saveState();
+      return send(id, text || HANDOFF_TEXT);
+    }
+    const handoff = calls.find((c) => c.name === "chuyen_nhan_vien");
+    if (handoff) {
+      await send(id, text || HANDOFF_TEXT);
+      return pause(id, handoff.input?.ly_do || "khách cần người thật");
+    }
+    if (text) await send(id, text);
+    messages.push({
+      role: "user",
+      content: calls.map((c) => {
+        try {
+          return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(tinhTongDon(c.input)) };
+        } catch (e) {
+          return { type: "tool_result", tool_use_id: c.id, content: "Lỗi tính tiền: " + e.message, is_error: true };
+        }
+      }),
+    });
+  }
+  await send(id, HANDOFF_TEXT);
+  pause(id, "AI không hoàn thành được câu trả lời");
+}
+
+// ---------- Facebook Messenger ----------
+async function graph(body) {
+  const base = process.env.GRAPH_URL || "https://graph.facebook.com"; // GRAPH_URL chỉ dùng khi chạy thử
+  const r = await fetch(`${base}/${GRAPH_VERSION}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
+}
+async function sendFb(id, text) {
+  for (let i = 0; i < text.length; i += 1900) {
+    await graph({ recipient: { id }, messaging_type: "RESPONSE", message: { text: text.slice(i, i + 1900), metadata: BOT_TAG } });
+  }
+}
+const typing = (id) => graph({ recipient: { id }, sender_action: "typing_on" });
+
+// Gom tin nhắn liên tiếp và xử lý lần lượt từng khách
+const buffers = new Map();
+const queues = new Map();
+function enqueue(id, text) {
+  const b = buffers.get(id) ?? { parts: [] };
+  b.parts.push(text);
+  clearTimeout(b.timer);
+  b.timer = setTimeout(() => {
+    buffers.delete(id);
+    const joined = b.parts.join("\n");
+    const prev = queues.get(id) ?? Promise.resolve();
+    const next = prev.then(() => handle(id, joined));
+    queues.set(id, next.catch(() => {}));
+  }, DEBOUNCE_MS);
+  buffers.set(id, b);
+}
+async function handle(id, text) {
+  if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  try {
+    await typing(id);
+    await reply(id, text, sendFb);
+  } catch (e) {
+    console.error("Lỗi khi trả lời khách", id, e);
+    user(id).history = [];
+    saveState();
+    if (e instanceof Anthropic.RateLimitError || e instanceof Anthropic.InternalServerError) {
+      await sendFb(id, "Dạ chị đợi em một chút, em kiểm tra rồi trả lời mình ngay ạ.");
+    }
+  }
+}
+
+const app = express();
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
+
+app.get("/webhook", (req, res) => {
+  if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.status(200).send(req.query["hub.challenge"]);
+  }
+  res.sendStatus(403);
+});
+
+app.post("/webhook", (req, res) => {
+  if (!APP_SECRET) return res.sendStatus(503);
+  const sig = req.get("x-hub-signature-256") || "";
+  const expected = "sha256=" + crypto.createHmac("sha256", APP_SECRET).update(req.rawBody || "").digest("hex");
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return res.sendStatus(403);
+  }
+  res.sendStatus(200);
+  if (req.body.object !== "page") return;
+
+  for (const entry of req.body.entry ?? []) {
+    for (const ev of entry.messaging ?? []) {
+      const msg = ev.message;
+      if (msg?.is_echo) {
+        // Tin do fanpage gửi. Không có nhãn của AI = người thật đang trả lời khách
+        if (msg.metadata !== BOT_TAG) pause(ev.recipient.id, "chủ shop tự trả lời");
+        continue;
+      }
+      const id = ev.sender?.id;
+      if (!id) continue;
+      if (msg?.text) enqueue(id, msg.text);
+      else if (msg?.attachments) enqueue(id, "[Khách gửi " + msg.attachments.map((a) => (a.type === "image" ? "một hình ảnh" : "một tệp")).join(", ") + "]");
+      else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
+    }
+  }
+});
+
+// ---------- Trang chạy thử: https://<địa-chỉ>/thu?key=<VERIFY_TOKEN> ----------
+const TEST_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chạy thử nhân viên chat</title><style>body{font:15px system-ui;max-width:560px;margin:0 auto;padding:16px}
+#log div{margin:6px 0;padding:8px 12px;border-radius:14px;max-width:80%;white-space:pre-wrap}.k{background:#0a6cff;color:#fff;margin-left:auto!important}
+.a{background:#eceff4}.n{color:#666;font-size:13px;text-align:center}form{display:flex;gap:8px}input{flex:1;padding:10px;border-radius:20px;border:1px solid #ccc}</style>
+<h3>Chạy thử nhân viên chat (Haiku thật)</h3><div id="log" style="display:flex;flex-direction:column"></div>
+<form id="f"><input id="t" placeholder="Nhắn như khách…" autocomplete="off"><button>Gửi</button></form>
+<p><button id="r">Cuộc chat mới</button></p><script>
+const key=new URLSearchParams(location.search).get("key");let id="thu-"+Date.now();
+const add=(t,c)=>{const d=document.createElement("div");d.className=c;d.textContent=t;log.appendChild(d)};
+r.onclick=()=>{id="thu-"+Date.now();log.textContent=""};
+f.onsubmit=async e=>{e.preventDefault();const text=t.value.trim();if(!text)return;t.value="";add(text,"k");
+const res=await fetch("/thu",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key,id,text})});
+const j=await res.json();(j.replies||[]).forEach(x=>add(x,"a"));if(j.note)add(j.note,"n")}</script>`;
+const okKey = (k) => typeof k === "string" && k === VERIFY_TOKEN;
+app.get("/thu", (req, res) => (okKey(req.query.key) ? res.send(TEST_PAGE) : res.sendStatus(403)));
+app.post("/thu", async (req, res) => {
+  const { key, id, text } = req.body || {};
+  if (!okKey(key) || !id || !text) return res.sendStatus(403);
+  if (user(id).pausedUntil > Date.now()) return res.json({ replies: [], note: "AI đang tạm dừng với khách này (đã chuyển người thật). Bấm Cuộc chat mới." });
+  const replies = [];
+  try {
+    await reply(id, String(text), async (_id, t) => { replies.push(t); });
+  } catch (e) {
+    console.error(e);
+    return res.json({ replies, note: "Lỗi: " + e.message });
+  }
+  const paused = user(id).pausedUntil > Date.now();
+  res.json({ replies, note: paused ? "→ AI đã chuyển cho người thật và tạm dừng với khách này." : "" });
+});
+
+app.get("/", (_req, res) => res.send("Nhân viên chat đang chạy"));
+app.listen(Number(PORT), () => console.log(`Đang chạy ở cổng ${PORT}, mô hình ${MODEL}`));
