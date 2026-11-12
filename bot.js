@@ -267,6 +267,7 @@ async function graph(body) {
     body: JSON.stringify(body),
   });
   if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
+  else if (body.message) console.log("[đã gửi] tin cho khách", body.recipient.id);
 }
 async function sendFb(id, text) {
   if (text.image) {
@@ -289,7 +290,7 @@ function enqueue(id, text) {
     buffers.delete(id);
     const joined = b.parts.join("\n");
     const prev = queues.get(id) ?? Promise.resolve();
-    const next = prev.then(() => handle(id, joined));
+    const next = prev.then(() => handle(id, joined)).finally(() => giveBack(id));
     queues.set(id, next.catch(() => {}));
   }, DEBOUNCE_MS);
   buffers.set(id, b);
@@ -358,28 +359,40 @@ app.post("/webhook", (req, res) => {
       else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
     }
     // Tin "dự bị": ứng dụng khác đang giữ quyền nhận tin chính. Giành quyền rồi mới trả lời.
-    // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
-    for (const ev of process.env.GIANH_QUYEN ? entry.standby ?? [] : []) {
+    for (const ev of entry.standby ?? []) {
       const msg = ev.message;
-      if (!msg || msg.is_echo || !ev.sender?.id) continue;
+      if (!msg) continue;
+      // Nhân viên trả lời qua Sapo (tin do trang gửi, không có nhãn AI): AI nhường khách này
+      if (msg.is_echo) { if (msg.metadata !== BOT_TAG) pause(ev.recipient.id, "nhân viên trả lời qua ứng dụng khác"); continue; }
+      // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
+      if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
       takeThread(ev.sender.id, msg.text || "[Khách gửi một hình ảnh hoặc tệp]");
     }
   }
 });
 
-// shortcut: giành quyền hội thoại mỗi tin dự bị; khi đã đặt bot làm ứng dụng nhận tin chính thì không cần nữa
+// Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
+const fbApi = (path, method, body) =>
+  fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
+    method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
+  }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
 async function takeThread(id, text) {
-  const fb = (path, method, body) =>
-    fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
-      method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
-    }).then((r) => r.json()).catch((e) => ({ error: e.message }));
-  const owner = await fb(`me/thread_owner?recipient=${id}`, "GET");
+  const owner = await fbApi(`me/thread_owner?recipient=${id}`, "GET");
   console.log("[standby] chủ hội thoại hiện tại:", JSON.stringify(owner));
-  const took = await fb("me/take_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
+  const took = await fbApi("me/take_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
   console.log("[standby] giành quyền:", JSON.stringify(took));
-  if (took.success) return enqueue(id, text);
-  const asked = await fb("me/request_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
-  console.log("[standby] xin quyền:", JSON.stringify(asked));
+  if (!took.success) return;
+  const prevApp = owner.data?.[0]?.thread_owner?.app_id;
+  if (prevApp) borrowed.set(id, prevApp);
+  enqueue(id, text);
+}
+async function giveBack(id) {
+  const app = borrowed.get(id);
+  if (!app) return;
+  borrowed.delete(id);
+  const r = await fbApi("me/pass_thread_control", "POST", { recipient: { id }, target_app_id: app, metadata: "ai-bot" });
+  console.log("[standby] trả lại hội thoại cho", app, JSON.stringify(r));
 }
 
 // ---------- Trang kiểm tra kết nối fanpage: /kiemtra?key=<VERIFY_TOKEN> (thêm &dangky=1 để đăng ký lại) ----------
