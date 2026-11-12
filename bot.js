@@ -344,8 +344,29 @@ app.post("/webhook", (req, res) => {
       else if (msg?.attachments) enqueue(id, "[Khách gửi " + msg.attachments.map((a) => (a.type === "image" ? "một hình ảnh" : "một tệp")).join(", ") + "]");
       else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
     }
+    // Tin "dự bị": ứng dụng khác đang giữ quyền nhận tin chính. Giành quyền rồi mới trả lời.
+    for (const ev of entry.standby ?? []) {
+      const msg = ev.message;
+      if (!msg || msg.is_echo || !ev.sender?.id) continue;
+      takeThread(ev.sender.id, msg.text || "[Khách gửi một hình ảnh hoặc tệp]");
+    }
   }
 });
+
+// shortcut: giành quyền hội thoại mỗi tin dự bị; khi đã đặt bot làm ứng dụng nhận tin chính thì không cần nữa
+async function takeThread(id, text) {
+  const fb = (path, method, body) =>
+    fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
+      method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
+    }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+  const owner = await fb(`me/thread_owner?recipient=${id}`, "GET");
+  console.log("[standby] chủ hội thoại hiện tại:", JSON.stringify(owner));
+  const took = await fb("me/take_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
+  console.log("[standby] giành quyền:", JSON.stringify(took));
+  if (took.success) return enqueue(id, text);
+  const asked = await fb("me/request_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
+  console.log("[standby] xin quyền:", JSON.stringify(asked));
+}
 
 // ---------- Trang kiểm tra kết nối fanpage: /kiemtra?key=<VERIFY_TOKEN> (thêm &dangky=1 để đăng ký lại) ----------
 app.get("/kiemtra", async (req, res) => {
