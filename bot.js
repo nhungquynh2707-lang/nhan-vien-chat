@@ -24,7 +24,9 @@ if (!PAGE_ACCESS_TOKEN || !APP_SECRET) console.warn("Chưa có PAGE_ACCESS_TOKEN
 
 const client = new Anthropic();
 const SHOP_INFO = fs.readFileSync(new URL("./shop.txt", import.meta.url), "utf8");
-const STATE_FILE = new URL("./state.json", import.meta.url);
+// Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
+const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
 const BOT_TAG = "ai-bot"; // gắn vào tin AI gửi để phân biệt với tin người thật gửi
 const DEBOUNCE_MS = 2500; // gom các tin khách gửi liên tiếp thành một lượt
 const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt đầu cuộc chat mới
@@ -75,6 +77,9 @@ Khách: "gà đá ăn được không" → "Dạ được ạ, sâu canxi giàu 
 Khách: "nuôi 10 con" → "Dạ 10 con thì anh lấy gói 2kg là vừa, 180k được miễn ship luôn ạ. Anh lấy gói này để em lên đơn nha?"
 Khách: "mấy ngày nhận được" → "Dạ khoảng 2–4 ngày tùy khu vực ạ, nhận hàng rồi mới trả tiền nên anh yên tâm. Anh định lấy mấy kg để em báo giá luôn ạ?"
 
+Lưu đơn: ngay khi chốt đơn (khách đã chọn số kg và có đủ số điện thoại, địa chỉ), gọi công cụ luu_don rồi mới trả lời câu chốt mẫu.
+Khách quen: nếu có mục "KHÁCH QUEN" bên dưới, đây là khách đã mua. Chào thân mật như khách quen. Khách muốn mua lại hoặc nói "như cũ", "địa chỉ cũ" thì dùng luôn số điện thoại, địa chỉ và đơn cũ, chỉ hỏi xác nhận nhanh một câu (ví dụ "Dạ anh lấy 2kg như lần trước, gửi về 12 Lê Lợi Huế đúng không ạ?"), không hỏi lại từ đầu.
+
 Tính tiền: khi khách đặt nhiều gói, gọi công cụ tinh_tong_don để tính tổng, không tự cộng nhẩm.
 
 Chuyển cho nhân viên thật: gọi công cụ chuyen_nhan_vien khi khách muốn gặp người thật / nhân viên / chủ shop, khi khách muốn hoàn tiền hoặc đổi trả, hoặc khi khách hỏi đi hỏi lại một điều bạn không có thông tin. CHỈ những trường hợp đó. Chuyển nhân viên là mất khách, nên hạn chế tối đa.
@@ -114,6 +119,21 @@ const TOOLS = [
     },
   },
   {
+    name: "luu_don",
+    description: "Lưu đơn đã chốt vào sổ khách quen để lần sau khách mua lại không phải hỏi lại. Gọi đúng một lần khi chốt đơn.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sdt", "dia_chi", "noi_dung"],
+      properties: {
+        sdt: { type: "string", description: "Số điện thoại người nhận" },
+        dia_chi: { type: "string", description: "Địa chỉ giao hàng đầy đủ" },
+        noi_dung: { type: "string", description: "Hàng đã đặt và tổng tiền, ví dụ: 2kg, 180.000đ miễn ship" },
+      },
+    },
+  },
+  {
     name: "chuyen_nhan_vien",
     description: "Chuyển cuộc trò chuyện cho nhân viên thật. Sau khi gọi, AI ngừng trả lời khách này.",
     strict: true,
@@ -138,6 +158,20 @@ function tinhTongDon({ items }) {
   };
 }
 
+// ---------- Sổ khách quen (giữ mãi, kể cả khi lịch sử chat bị xóa) ----------
+function luuDon(u, { sdt, dia_chi, noi_dung }) {
+  const k = (u.khach ??= { don: [] });
+  Object.assign(k, { sdt, dia_chi });
+  k.don.push({ ngay: new Date().toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }), noi_dung });
+  k.don = k.don.slice(-10); // shortcut: chỉ giữ 10 đơn gần nhất, đủ cho tư vấn
+  saveState();
+  console.log("[đơn mới]", sdt, dia_chi, noi_dung);
+  return { da_luu: true };
+}
+const khachQuen = (k) =>
+  `KHÁCH QUEN: số điện thoại ${k.sdt}, địa chỉ ${k.dia_chi}. Các đơn đã mua: ` +
+  k.don.map((d) => `${d.ngay}: ${d.noi_dung}`).join("; ") + ".";
+
 // ---------- Gọi Claude ----------
 const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
@@ -154,7 +188,7 @@ async function reply(id, customerText, send = sendFb) {
       max_tokens: 1024,
       output_config: { effort: "medium" },
       cache_control: { type: "ephemeral" },
-      system: SYSTEM,
+      system: u.khach ? [{ type: "text", text: SYSTEM }, { type: "text", text: khachQuen(u.khach) }] : SYSTEM,
       tools: TOOLS,
       messages,
     });
@@ -180,7 +214,8 @@ async function reply(id, customerText, send = sendFb) {
       role: "user",
       content: calls.map((c) => {
         try {
-          return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(tinhTongDon(c.input)) };
+          const out = c.name === "luu_don" ? luuDon(u, c.input) : tinhTongDon(c.input);
+          return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(out) };
         } catch (e) {
           return { type: "tool_result", tool_use_id: c.id, content: "Lỗi tính tiền: " + e.message, is_error: true };
         }
@@ -283,18 +318,20 @@ const TEST_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" co
 .a{background:#eceff4}.n{color:#666;font-size:13px;text-align:center}form{display:flex;gap:8px}input{flex:1;padding:10px;border-radius:20px;border:1px solid #ccc}</style>
 <h3>Chạy thử nhân viên chat (Haiku thật)</h3><div id="log" style="display:flex;flex-direction:column"></div>
 <form id="f"><input id="t" placeholder="Nhắn như khách…" autocomplete="off"><button>Gửi</button></form>
-<p><button id="r">Cuộc chat mới</button></p><script>
+<p><button id="r">Cuộc chat mới</button> <button id="q">Khách cũ quay lại</button></p><script>
 const key=new URLSearchParams(location.search).get("key");let id="thu-"+Date.now();
 const add=(t,c)=>{const d=document.createElement("div");d.className=c;d.textContent=t;log.appendChild(d)};
-r.onclick=()=>{id="thu-"+Date.now();log.textContent=""};
+let quay=false;r.onclick=()=>{id="thu-"+Date.now();log.textContent=""};
+q.onclick=()=>{quay=true;log.textContent="";add("(Cùng khách, lịch sử chat đã xóa như khi quay lại hôm sau)","n")};
 f.onsubmit=async e=>{e.preventDefault();const text=t.value.trim();if(!text)return;t.value="";add(text,"k");
-const res=await fetch("/thu",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key,id,text})});
+const res=await fetch("/thu",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key,id,text,quay})});quay=false;
 const j=await res.json();(j.replies||[]).forEach(x=>add(x,"a"));if(j.note)add(j.note,"n")}</script>`;
 const okKey = (k) => typeof k === "string" && k === VERIFY_TOKEN;
 app.get("/thu", (req, res) => (okKey(req.query.key) ? res.send(TEST_PAGE) : res.sendStatus(403)));
 app.post("/thu", async (req, res) => {
-  const { key, id, text } = req.body || {};
+  const { key, id, text, quay } = req.body || {};
   if (!okKey(key) || !id || !text) return res.sendStatus(403);
+  if (quay) Object.assign(user(id), { history: [], pausedUntil: 0 });
   if (user(id).pausedUntil > Date.now()) return res.json({ replies: [], note: "AI đang tạm dừng với khách này (đã chuyển người thật). Bấm Cuộc chat mới." });
   const replies = [];
   try {
