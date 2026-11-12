@@ -44,6 +44,9 @@ Có thể được sử dụng làm thức ăn bổ sung cho:
 * Lươn.
 * Ếch.
 * Bò sát và một số vật nuôi ăn côn trùng.
+* Chuột hamster, nhím.
+* Chó, mèo (dùng như đồ ăn vặt bổ sung, cho lượng nhỏ).
+(Nhãn túi 1kg của shop ghi: "thức ăn ưa thích và cần thiết cho gà đá, chuột hamster, cá, chim, nhím, bò sát, chó mèo".)
 Lưu ý:
 * Đây là thức ăn bổ sung, không mặc định thay thế hoàn toàn thức ăn chính.
 * Không cam kết chữa bệnh.
