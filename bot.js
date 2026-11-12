@@ -294,6 +294,13 @@ function enqueue(id, text) {
 }
 async function handle(id, text) {
   if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  if (/x[oó]a\s+d[uữ]\s*li[eệ]u/i.test(text)) {
+    // Đúng như trang /xoa-du-lieu hứa: xóa mọi thứ đã lưu về khách này
+    delete state.users[id];
+    saveState();
+    console.log("[xóa dữ liệu] khách", id);
+    return sendFb(id, "Dạ em đã xóa toàn bộ dữ liệu bên em lưu về anh/chị (lịch sử trò chuyện, số điện thoại, địa chỉ) ạ.");
+  }
   try {
     await typing(id);
     await reply(id, text, sendFb);
@@ -309,6 +316,9 @@ async function handle(id, text) {
 
 const app = express();
 app.use("/anh", express.static(fileURLToPath(new URL("./anh", import.meta.url))));
+// Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu
+app.get("/chinh-sach-rieng-tu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/chinh-sach.html", import.meta.url))));
+app.get("/xoa-du-lieu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/xoa-du-lieu.html", import.meta.url))));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 app.get("/webhook", (req, res) => {
