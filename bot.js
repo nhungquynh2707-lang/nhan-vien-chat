@@ -315,7 +315,8 @@ async function handle(id, text) {
 }
 
 const app = express();
-app.use("/anh", express.static(fileURLToPath(new URL("./anh", import.meta.url))));
+// Ảnh sản phẩm công khai; cho phép trang khác tải về (CORS) để dùng làm biểu tượng ứng dụng
+app.use("/anh", (_req, res, next) => { res.set("Access-Control-Allow-Origin", "*"); next(); }, express.static(fileURLToPath(new URL("./anh", import.meta.url))));
 // Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu
 app.get("/chinh-sach-rieng-tu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/chinh-sach.html", import.meta.url))));
 app.get("/xoa-du-lieu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/xoa-du-lieu.html", import.meta.url))));
