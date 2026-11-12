@@ -329,6 +329,8 @@ app.post("/webhook", (req, res) => {
   if (req.body.object !== "page") return;
 
   for (const entry of req.body.entry ?? []) {
+    // Ghi lại loại sự kiện để dò lỗi (không ghi nội dung tin)
+    console.log("[webhook] trang", entry.id, "messaging:", (entry.messaging ?? []).length, "standby:", (entry.standby ?? []).length);
     for (const ev of entry.messaging ?? []) {
       const msg = ev.message;
       if (msg?.is_echo) {
@@ -343,6 +345,18 @@ app.post("/webhook", (req, res) => {
       else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
     }
   }
+});
+
+// ---------- Trang kiểm tra kết nối fanpage: /kiemtra?key=<VERIFY_TOKEN> (thêm &dangky=1 để đăng ký lại) ----------
+app.get("/kiemtra", async (req, res) => {
+  if (!okKey(req.query.key)) return res.sendStatus(403);
+  const g = (path, opts) =>
+    fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, opts).then((r) => r.json());
+  const out = {};
+  if (req.query.dangky) out.dang_ky_lai = await g("me/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_echoes", { method: "POST" });
+  out.trang = await g("me?fields=id,name");
+  out.ung_dung_dang_ky = await g("me/subscribed_apps");
+  res.json(out);
 });
 
 // ---------- Trang chạy thử: https://<địa-chỉ>/thu?key=<VERIFY_TOKEN> ----------
