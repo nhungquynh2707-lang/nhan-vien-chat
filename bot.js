@@ -354,7 +354,7 @@ app.get("/kiemtra", async (req, res) => {
     fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, opts).then((r) => r.json());
   const out = {};
   if (req.query.dangky) out.dang_ky_lai = await g("me/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_echoes", { method: "POST" });
-  out.trang = await g("me?fields=id,name");
+  out.trang = await g("me?fields=id");
   out.ung_dung_dang_ky = await g("me/subscribed_apps");
   res.json(out);
 });
