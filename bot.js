@@ -2,6 +2,7 @@
 // Chạy: node --env-file=.env bot.js
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -77,6 +78,8 @@ Khách: "gà đá ăn được không" → "Dạ được ạ, sâu canxi giàu 
 Khách: "nuôi 10 con" → "Dạ 10 con thì anh lấy gói 2kg là vừa, 180k được miễn ship luôn ạ. Anh lấy gói này để em lên đơn nha?"
 Khách: "mấy ngày nhận được" → "Dạ khoảng 2–4 ngày tùy khu vực ạ, nhận hàng rồi mới trả tiền nên anh yên tâm. Anh định lấy mấy kg để em báo giá luôn ạ?"
 
+Ảnh: khách hỏi xem ảnh, hình thật, sâu trông thế nào, có khô không, đóng gói ra sao, hoặc còn nghi ngờ chất lượng thì gọi gui_anh (chọn loại phù hợp) kèm một câu ngắn, rồi hỏi tiếp để chốt đơn. Mỗi loại ảnh chỉ gửi một lần trong cuộc chat.
+
 Lưu đơn: ngay khi chốt đơn (khách đã chọn số kg và có đủ số điện thoại, địa chỉ), gọi công cụ luu_don rồi mới trả lời câu chốt mẫu.
 Khách quen: nếu có mục "KHÁCH QUEN" bên dưới, đây là khách đã mua. Chào thân mật như khách quen. Khách muốn mua lại hoặc nói "như cũ", "địa chỉ cũ" thì dùng luôn số điện thoại, địa chỉ và đơn cũ, chỉ hỏi xác nhận nhanh một câu (ví dụ "Dạ anh lấy 2kg như lần trước, gửi về 12 Lê Lợi Huế đúng không ạ?"), không hỏi lại từ đầu.
 
@@ -116,6 +119,17 @@ const TOOLS = [
           },
         },
       },
+    },
+  },
+  {
+    name: "gui_anh",
+    description: "Gửi ảnh thật của sản phẩm cho khách. san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["loai"],
+      properties: { loai: { type: "string", enum: ["san_pham", "can_canh", "dong_goi"] } },
     },
   },
   {
@@ -172,6 +186,14 @@ const khachQuen = (k) =>
   `KHÁCH QUEN: số điện thoại ${k.sdt}, địa chỉ ${k.dia_chi}. Các đơn đã mua: ` +
   k.don.map((d) => `${d.ngay}: ${d.noi_dung}`).join("; ") + ".";
 
+// ---------- Ảnh sản phẩm (thư mục anh/) ----------
+const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
+const ANH = {
+  san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
+  can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
+  dong_goi: ["tui-zip.jpg"],
+};
+
 // ---------- Gọi Claude ----------
 const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
@@ -212,10 +234,15 @@ async function reply(id, customerText, send = sendFb) {
       return pause(id, handoff.input?.ly_do || "khách cần người thật");
     }
     if (text) await send(id, text);
+    const pending = [];
     messages.push({
       role: "user",
       content: calls.map((c) => {
         try {
+          if (c.name === "gui_anh") {
+            pending.push(...(ANH[c.input.loai] ?? []).map((f) => ({ image: `${BASE_URL}/anh/${f}` })));
+            return { type: "tool_result", tool_use_id: c.id, content: "Đã gửi ảnh cho khách." };
+          }
           const out = c.name === "luu_don" ? luuDon(u, c.input) : tinhTongDon(c.input);
           return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(out) };
         } catch (e) {
@@ -223,6 +250,7 @@ async function reply(id, customerText, send = sendFb) {
         }
       }),
     });
+    for (const img of pending) await send(id, img);
   }
   await send(id, HANDOFF_TEXT);
   pause(id, "AI không hoàn thành được câu trả lời");
@@ -239,6 +267,9 @@ async function graph(body) {
   if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
 }
 async function sendFb(id, text) {
+  if (text.image) {
+    return graph({ recipient: { id }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url: text.image, is_reusable: true } }, metadata: BOT_TAG } });
+  }
   for (let i = 0; i < text.length; i += 1900) {
     await graph({ recipient: { id }, messaging_type: "RESPONSE", message: { text: text.slice(i, i + 1900), metadata: BOT_TAG } });
   }
@@ -277,6 +308,7 @@ async function handle(id, text) {
 }
 
 const app = express();
+app.use("/anh", express.static(fileURLToPath(new URL("./anh", import.meta.url))));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 app.get("/webhook", (req, res) => {
@@ -322,7 +354,7 @@ const TEST_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" co
 <form id="f"><input id="t" placeholder="Nhắn như khách…" autocomplete="off"><button>Gửi</button></form>
 <p><button id="r">Cuộc chat mới</button> <button id="q">Khách cũ quay lại</button></p><script>
 const key=new URLSearchParams(location.search).get("key");let id="thu-"+Date.now();
-const add=(t,c)=>{const d=document.createElement("div");d.className=c;d.textContent=t;log.appendChild(d)};
+const add=(t,c)=>{const d=document.createElement("div");d.className=c;if(t.image){const i=document.createElement("img");i.src=t.image;i.style.maxWidth="220px";d.appendChild(i)}else d.textContent=t;log.appendChild(d)};
 let quay=false;r.onclick=()=>{id="thu-"+Date.now();log.textContent=""};
 q.onclick=()=>{quay=true;log.textContent="";add("(Cùng khách, lịch sử chat đã xóa như khi quay lại hôm sau)","n")};
 f.onsubmit=async e=>{e.preventDefault();const text=t.value.trim();if(!text)return;t.value="";add(text,"k");
