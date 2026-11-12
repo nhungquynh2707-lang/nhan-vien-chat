@@ -363,7 +363,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (!msg) continue;
       // Nhân viên trả lời qua Sapo (tin do trang gửi, không có nhãn AI): AI nhường khách này
-      if (msg.is_echo) { if (msg.metadata !== BOT_TAG) pause(ev.recipient.id, "nhân viên trả lời qua ứng dụng khác"); continue; }
+      if (msg.is_echo) { if (msg.metadata !== BOT_TAG) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
       // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
       if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
       takeThread(ev.sender.id, msg.text || "[Khách gửi một hình ảnh hoặc tệp]");
