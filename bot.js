@@ -137,7 +137,7 @@ function tinhTongDon({ items }) {
 }
 
 // ---------- Gọi Claude ----------
-const HANDOFF_TEXT = "Dạ chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
+const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
 async function reply(id, customerText, send = sendFb) {
   const u = user(id);
@@ -232,7 +232,7 @@ async function handle(id, text) {
     user(id).history = [];
     saveState();
     if (e instanceof Anthropic.RateLimitError || e instanceof Anthropic.InternalServerError) {
-      await sendFb(id, "Dạ chị đợi em một chút, em kiểm tra rồi trả lời mình ngay ạ.");
+      await sendFb(id, "Dạ anh/chị đợi em một chút, em kiểm tra rồi trả lời mình ngay ạ.");
     }
   }
 }
