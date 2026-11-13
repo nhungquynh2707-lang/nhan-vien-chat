@@ -218,6 +218,15 @@ const ANH = {
 const CHOT_TEXT = "Dạ! Để em chuẩn bị và gửi luôn ạ.";
 const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
+// Ảnh khách gửi: đưa link ảnh cho Claude tự xem (đọc được SĐT, địa chỉ viết tay, ảnh hàng lỗi)
+const ANH_KHACH = /\[Khách gửi ảnh: (\S+)\]/g;
+function noiDungClaude(text) {
+  const urls = [...text.matchAll(ANH_KHACH)].map((m) => m[1]);
+  if (!urls.length) return text;
+  const chu = text.replace(ANH_KHACH, "[Khách gửi một hình ảnh, xem ảnh bên dưới. Nếu ảnh có số điện thoại hoặc địa chỉ thì dùng như khách gõ chữ]");
+  return [{ type: "text", text: chu }, ...urls.map((url) => ({ type: "image", source: { type: "url", url } }))];
+}
+
 async function reply(id, customerText, send = sendFb) {
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
@@ -228,7 +237,7 @@ async function reply(id, customerText, send = sendFb) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
     u.ctx = [u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
   }
-  messages.push({ role: "user", content: customerText });
+  messages.push({ role: "user", content: noiDungClaude(customerText) });
 
   for (let step = 0; step < 5; step++) {
     const res = await client.messages.create({
@@ -327,6 +336,7 @@ function enqueue(id, text) {
 }
 async function handle(id, text) {
   if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  if (text.includes(GHI_AM)) return pause(id, "khách gửi ghi âm, nhân viên nghe");
   if (/x[oó]a\s+d[uữ]\s*li[eệ]u/i.test(text)) {
     // Đúng như trang /xoa-du-lieu hứa: xóa mọi thứ đã lưu về khách này
     delete state.users[id];
@@ -420,11 +430,13 @@ function nguoiThat(id) {
 }
 
 // Vẫy tay, like, nhãn dán đến dưới dạng ảnh có sticker_id: coi là lời chào
+const GHI_AM = "[Khách gửi tin nhắn thoại]";
 function noiDung(msg) {
   if (msg.text) return msg.text;
   return (msg.attachments ?? []).map((a) =>
     a.payload?.sticker_id ? "[Khách gửi nhãn dán/vẫy tay chào – coi như khách chào hoặc đồng ý]"
-    : a.type === "image" ? "[Khách gửi một hình ảnh]" : "[Khách gửi một tệp]").join("\n") || "[Khách gửi tin không có chữ]";
+    : a.type === "image" && a.payload?.url ? `[Khách gửi ảnh: ${a.payload.url}]`
+    : a.type === "audio" ? GHI_AM : "[Khách gửi một tệp]").join("\n") || "[Khách gửi tin không có chữ]";
 }
 
 // Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
