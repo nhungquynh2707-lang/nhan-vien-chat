@@ -336,7 +336,15 @@ async function handle(id, text) {
   }
   try {
     await typing(id);
-    await reply(id, text, sendFb);
+    try {
+      await reply(id, text, sendFb);
+    } catch (e) {
+      // Hướng dẫn bot vừa được cập nhật giữa cuộc chat: Claude không nhận lịch sử cũ. Bỏ lịch sử, đọc lại từ Facebook và trả lời lại.
+      if (!(e instanceof Anthropic.BadRequestError)) throw e;
+      console.log("[thử lại] khách", id, e.message.slice(0, 80));
+      user(id).history = [];
+      await reply(id, text, sendFb);
+    }
   } catch (e) {
     console.error("Lỗi khi trả lời khách", id, e);
     user(id).history = [];
