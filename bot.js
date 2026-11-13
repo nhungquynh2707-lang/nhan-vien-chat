@@ -29,7 +29,7 @@ const SHOP_INFO = fs.readFileSync(new URL("./shop.txt", import.meta.url), "utf8"
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
 const BOT_TAG = "ai-bot"; // gắn vào tin AI gửi để phân biệt với tin người thật gửi
-const DEBOUNCE_MS = 2500; // gom các tin khách gửi liên tiếp thành một lượt
+const DEBOUNCE_MS = 10000; // gom các tin khách gửi liên tiếp thành một lượt
 const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt đầu cuộc chat mới
 const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
 
