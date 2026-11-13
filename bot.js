@@ -220,11 +220,23 @@ const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân vi
 
 // Ảnh khách gửi: đưa link ảnh cho Claude tự xem (đọc được SĐT, địa chỉ viết tay, ảnh hàng lỗi)
 const ANH_KHACH = /\[Khách gửi ảnh: (\S+)\]/g;
-function noiDungClaude(text) {
+async function noiDungClaude(text) {
   const urls = [...text.matchAll(ANH_KHACH)].map((m) => m[1]);
   if (!urls.length) return text;
-  const chu = text.replace(ANH_KHACH, "[Khách gửi một hình ảnh, xem ảnh bên dưới. Nếu ảnh có số điện thoại hoặc địa chỉ thì dùng như khách gõ chữ]");
-  return [{ type: "text", text: chu }, ...urls.map((url) => ({ type: "image", source: { type: "url", url } }))];
+  // Bot tự tải ảnh từ Facebook rồi đưa cho Claude (Claude không chắc tải được link Facebook)
+  const anh = [];
+  for (const url of urls.slice(0, 4)) {
+    try {
+      const r = await fetch(url);
+      const type = (r.headers.get("content-type") || "").split(";")[0];
+      if (!r.ok || !/^image\/(jpeg|png|gif|webp)$/.test(type)) throw new Error(r.status + " " + type);
+      anh.push({ type: "image", source: { type: "base64", media_type: type, data: Buffer.from(await r.arrayBuffer()).toString("base64") } });
+    } catch (e) { console.log("[ảnh] không tải được:", e.message); }
+  }
+  const chu = text.replace(ANH_KHACH, anh.length
+    ? "[Khách gửi một hình ảnh, xem ảnh bên dưới. Nếu ảnh có số điện thoại hoặc địa chỉ thì dùng như khách gõ chữ]"
+    : "[Khách gửi một hình ảnh nhưng em không mở được]");
+  return [{ type: "text", text: chu }, ...anh];
 }
 
 async function reply(id, customerText, send = sendFb) {
@@ -237,7 +249,7 @@ async function reply(id, customerText, send = sendFb) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
     u.ctx = [u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
   }
-  messages.push({ role: "user", content: noiDungClaude(customerText) });
+  messages.push({ role: "user", content: await noiDungClaude(customerText) });
 
   for (let step = 0; step < 5; step++) {
     const res = await client.messages.create({
