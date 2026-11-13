@@ -341,8 +341,11 @@ function enqueue(id, text) {
     buffers.delete(id);
     const joined = b.parts.join("\n");
     const prev = queues.get(id) ?? Promise.resolve();
-    const next = prev.then(() => handle(id, joined)).finally(() => giveBack(id));
-    queues.set(id, next.catch(() => {}));
+    // Chỉ trả hội thoại cho Sapo khi khách không còn tin nào đang chờ, kẻo tin sau gửi không đi
+    const tail = prev.then(() => handle(id, joined))
+      .finally(() => { if (!buffers.has(id) && queues.get(id) === tail) return giveBack(id); })
+      .catch(() => {});
+    queues.set(id, tail);
   }, DEBOUNCE_MS);
   buffers.set(id, b);
 }
