@@ -211,6 +211,7 @@ const ANH = {
 };
 
 // ---------- Gọi Claude ----------
+const CHOT_TEXT = "Dạ! Để em chuẩn bị và gửi luôn ạ.";
 const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
 async function reply(id, customerText, send = sendFb) {
@@ -243,6 +244,13 @@ async function reply(id, customerText, send = sendFb) {
       return pause(id, "AI từ chối trả lời");
     }
     const calls = res.content.filter((b) => b.type === "tool_use");
+    // Đã có đủ SĐT + địa chỉ (lưu đơn) hoặc bot đã nói câu chốt: gửi câu chốt rồi nhường Sapo/nhân viên lên đơn
+    const luu = calls.find((c) => c.name === "luu_don");
+    if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
+      if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
+      await send(id, CHOT_TEXT);
+      return pause(id, "đã chốt đơn, nhường Sapo lên đơn");
+    }
     if (!calls.length) {
       saveState();
       return send(id, text || HANDOFF_TEXT);
