@@ -274,7 +274,9 @@ async function reply(id, customerText, send = sendFb) {
     if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
       await send(id, CHOT_TEXT);
-      return pause(id, "đã chốt đơn, nhường Sapo lên đơn");
+      u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
+      saveState();
+      return console.log("[chốt đơn] khách", id);
     }
     if (!calls.length) {
       saveState();
@@ -351,6 +353,9 @@ function enqueue(id, text) {
 }
 async function handle(id, text) {
   if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  // Chốt đơn quá 30 phút: nhường Sapo/nhân viên (trong ngày). Sang hôm sau bot trả lời lại như khách mới.
+  const sauChot = Date.now() - (user(id).chotLuc || 0);
+  if (sauChot > 30 * 60000 && sauChot < IDLE_RESET_MS) { user(id).chotLuc = 0; return pause(id, "đã chốt đơn quá 30 phút, nhường Sapo"); }
   if (text.includes(GHI_AM)) return pause(id, "khách gửi ghi âm, nhân viên nghe");
   if (/x[oó]a\s+d[uữ]\s*li[eệ]u/i.test(text)) {
     // Đúng như trang /xoa-du-lieu hứa: xóa mọi thứ đã lưu về khách này
