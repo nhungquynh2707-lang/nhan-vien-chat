@@ -371,8 +371,7 @@ app.post("/webhook", (req, res) => {
       }
       const id = ev.sender?.id;
       if (!id) continue;
-      if (msg?.text) enqueue(id, msg.text);
-      else if (msg?.attachments) enqueue(id, "[Khách gửi " + msg.attachments.map((a) => (a.type === "image" ? "một hình ảnh" : "một tệp")).join(", ") + "]");
+      if (msg?.text || msg?.attachments) enqueue(id, noiDung(msg));
       else if (ev.postback) enqueue(id, ev.postback.title || ev.postback.payload || "Bắt đầu");
     }
     // Tin "dự bị": ứng dụng khác đang giữ quyền nhận tin chính. Giành quyền rồi mới trả lời.
@@ -383,10 +382,18 @@ app.post("/webhook", (req, res) => {
       if (msg.is_echo) { if (msg.metadata !== BOT_TAG) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
       // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
       if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
-      takeThread(ev.sender.id, msg.text || "[Khách gửi một hình ảnh hoặc tệp]");
+      takeThread(ev.sender.id, noiDung(msg));
     }
   }
 });
+
+// Vẫy tay, like, nhãn dán đến dưới dạng ảnh có sticker_id: coi là lời chào
+function noiDung(msg) {
+  if (msg.text) return msg.text;
+  return (msg.attachments ?? []).map((a) =>
+    a.payload?.sticker_id ? "[Khách gửi nhãn dán/vẫy tay chào – coi như khách chào hoặc đồng ý]"
+    : a.type === "image" ? "[Khách gửi một hình ảnh]" : "[Khách gửi một tệp]").join("\n") || "[Khách gửi tin không có chữ]";
+}
 
 // Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
 const fbApi = (path, method, body) =>
