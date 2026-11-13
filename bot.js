@@ -60,7 +60,7 @@ const SYSTEM = `Bạn là nhân viên chăm sóc khách hàng của cửa hàng 
 Làm đúng theo hướng dẫn của cửa hàng bên dưới (phong cách, câu mẫu, cách lấy thông tin đặt hàng). Không dùng markdown (không **, không #).
 
 BẠN LÀ NHÂN VIÊN BÁN HÀNG GIỎI, không phải máy trả lời. Mỗi tin TỐI ĐA 2 câu ngắn, dưới 30 chữ, nói như nhắn tin điện thoại, không liệt kê, không markdown. Chỉ thêm phần 2 khi khách còn phân vân; khi khách đã chọn số kg hoặc đang cho thông tin thì bỏ phần 2, chỉ trả lời và hỏi đúng thứ còn thiếu:
-Khách nói "địa chỉ cũ", "như cũ", "như lần trước", "gửi như lần trước": coi như khách đã đặt hàng, trả lời đúng câu "Dạ! Để em chuẩn bị và gửi luôn ạ." rồi dừng, KHÔNG hỏi lại số điện thoại hay địa chỉ (nhân viên tự tra thông tin cũ).
+Khách nói "địa chỉ cũ", "như cũ", "như lần trước", "gửi như lần trước": nếu LỊCH SỬ CHAT hoặc KHÁCH QUEN có số điện thoại và địa chỉ thì gọi luu_don với thông tin đó trước; dù có hay không, trả lời đúng câu "Dạ! Để em chuẩn bị và gửi luôn ạ." rồi dừng, KHÔNG hỏi lại số điện thoại hay địa chỉ (nhân viên tự tra thông tin cũ).
 1. Trả lời thẳng câu khách hỏi.
 2. Một điểm hay của sản phẩm hợp với nhu cầu khách (ví dụ: giàu đạm và canxi tự nhiên, sấy lạnh không chất bảo quản, giữ nguyên con nên gà/chim thích mổ). Không hứa chữa bệnh hay tăng trưởng vượt trội.
 3. Một câu hỏi dẫn tới chốt đơn: hỏi khách nuôi bao nhiêu con để tư vấn số kg, hoặc gợi ý gói cụ thể (2kg trở lên được miễn ship nên có lợi hơn), hoặc hỏi lấy mấy kg.
@@ -190,6 +190,19 @@ const khachQuen = (k) =>
   k.don.map((d) => `${d.ngay}: ${d.noi_dung}`).join("; ") + ".";
 
 // ---------- Ảnh sản phẩm (thư mục anh/) ----------
+// Đọc ~20 tin gần nhất giữa khách và fanpage (gồm tin nhân viên/AI khác) để bot nối tiếp được
+async function lichSuChat(id) {
+  if (!PAGE_ACCESS_TOKEN) return null;
+  try {
+    const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/conversations?platform=messenger&user_id=${id}&fields=messages.limit(20){message,from,created_time}&access_token=${PAGE_ACCESS_TOKEN}`).then((x) => x.json());
+    if (r.error) { console.log("[lịch sử chat] không đọc được:", r.error.message); return null; }
+    const msgs = (r.data?.[0]?.messages?.data ?? []).filter((m) => m.message).reverse();
+    console.log("[lịch sử chat] đọc được", msgs.length, "tin của khách", id);
+    if (!msgs.length) return null;
+    const dong = msgs.map((m) => `${m.created_time.slice(0, 10)} ${m.from?.id === id ? "Khách" : "Shop"}: ${m.message}`);
+    return "LỊCH SỬ CHAT TRƯỚC ĐÓ với khách này (cũ đến mới, tin cuối có thể là tin khách vừa gửi). Đọc để nối tiếp, không hỏi lại điều đã có, không chào lại nếu đang dở chuyện:\n" + dong.join("\n");
+  } catch (e) { console.log("[lịch sử chat] lỗi:", e.message); return null; }
+}
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
 const ANH = {
   san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
@@ -206,7 +219,10 @@ async function reply(id, customerText, send = sendFb) {
   u.lastActive = Date.now();
   const messages = u.history;
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
-  if (!messages.length) u.ctx = u.khach ? khachQuen(u.khach) : null;
+  if (!messages.length) {
+    const ls = send === sendFb ? await lichSuChat(id) : null;
+    u.ctx = [u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
+  }
   messages.push({ role: "user", content: customerText });
 
   for (let step = 0; step < 5; step++) {
