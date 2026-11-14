@@ -34,6 +34,8 @@ const BOT_TAG = "ai-bot"; // gắn vào tin AI gửi để phân biệt với ti
 const DEBOUNCE_MS = 10000; // gom các tin khách gửi liên tiếp thành một lượt
 const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt đầu cuộc chat mới
 const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
+// Chuyển nhân viên (khiếu nại, đổi hàng...) dừng lâu hơn nếu đặt HANDOFF_HOURS; không đặt thì như PAUSE_HOURS
+const HANDOFF_MS = Number(process.env.HANDOFF_HOURS || PAUSE_HOURS) * 3600 * 1000;
 
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
 let state = { users: {} };
@@ -48,9 +50,9 @@ function saveState() {
 function user(id) {
   return (state.users[id] ??= { history: [], pausedUntil: 0, lastActive: 0 });
 }
-function pause(id, reason) {
+function pause(id, reason, ms = PAUSE_MS) {
   const u = user(id);
-  u.pausedUntil = Date.now() + PAUSE_MS;
+  u.pausedUntil = Math.max(u.pausedUntil || 0, Date.now() + ms); // không rút ngắn lệnh dừng dài hơn đang có
   u.history = []; // khi AI quay lại sẽ bắt đầu cuộc chat mới
   saveState();
   console.log(`[tạm dừng AI] khách ${id}: ${reason}`);
@@ -289,7 +291,7 @@ async function reply(id, customerText, send = sendFb) {
     const handoff = calls.find((c) => c.name === "chuyen_nhan_vien");
     if (handoff) {
       await send(id, text || HANDOFF_TEXT);
-      return pause(id, handoff.input?.ly_do || "khách cần người thật");
+      return pause(id, handoff.input?.ly_do || "khách cần người thật", HANDOFF_MS);
     }
     if (text) await send(id, text);
     const pending = [];
