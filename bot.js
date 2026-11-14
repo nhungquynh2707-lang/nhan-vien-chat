@@ -426,7 +426,10 @@ app.post("/webhook", (req, res) => {
 
   for (const entry of req.body.entry ?? []) {
     // Ghi lại loại sự kiện để dò lỗi (không ghi nội dung tin)
-    console.log("[webhook] trang", entry.id, "messaging:", (entry.messaging ?? []).length, "standby:", (entry.standby ?? []).length);
+    console.log("[webhook] trang", entry.id, "messaging:", (entry.messaging ?? []).length, "standby:", (entry.standby ?? []).length, "changes:", (entry.changes ?? []).length);
+    for (const ch of entry.changes ?? []) {
+      if (ch.field === "feed" && process.env.BINH_LUAN) binhLuan(entry.id, ch.value).catch((e) => console.error("[bình luận] lỗi:", e.message));
+    }
     for (const ev of entry.messaging ?? []) {
       const msg = ev.message;
       if (msg?.is_echo) {
@@ -497,13 +500,51 @@ async function giveBack(id) {
   console.log("[standby] trả lại hội thoại cho", app, JSON.stringify(r));
 }
 
+// ---------- Trả lời bình luận (bật bằng BINH_LUAN=1, page cần đăng ký trường "feed" và quyền pages_manage_engagement) ----------
+const TOOL_BL = {
+  name: "tra_loi_binh_luan",
+  description: "Trả lời một bình luận của khách dưới bài viết. Để trống cả hai nếu không nên trả lời.",
+  input_schema: {
+    type: "object",
+    properties: {
+      cong_khai: { type: "string", description: "Câu trả lời hiện công khai dưới bình luận. Rỗng nếu không trả lời." },
+      nhan_rieng: { type: "string", description: "Tin nhắn riêng gửi vào Messenger của khách. Rỗng nếu không nhắn." },
+      an_binh_luan: { type: "boolean", description: "true nếu bình luận có số điện thoại hoặc địa chỉ của khách" },
+    },
+    required: ["cong_khai", "nhan_rieng", "an_binh_luan"],
+  },
+};
+async function soanBinhLuan(binhLuan, baiViet = "") {
+  const res = await client.messages.create({
+    model: MODEL,
+    max_tokens: 600,
+    system: `Bạn là nhân viên trực fanpage, trả lời BÌNH LUẬN của khách dưới bài viết/quảng cáo bằng tiếng Việt. Làm đúng mục TRẢ LỜI BÌNH LUẬN trong thông tin cửa hàng (ưu tiên hơn mọi hướng dẫn nhắn tin khác). Không markdown.\n\nTHÔNG TIN CỬA HÀNG:\n${SHOP_INFO}`,
+    tools: [TOOL_BL],
+    tool_choice: { type: "tool", name: TOOL_BL.name },
+    messages: [{ role: "user", content: `Bài viết: ${baiViet.slice(0, 300) || "(không rõ)"}\nBình luận của khách: ${binhLuan}` }],
+  });
+  return res.content.find((b) => b.type === "tool_use")?.input ?? {};
+}
+const daTraLoiBL = new Set(); // shortcut: chỉ nhớ trong bộ nhớ, khởi động lại giữa lúc Facebook gửi lại sự kiện thì có thể trả lời 2 lần (hiếm)
+async function binhLuan(pageId, v) {
+  if (v.item !== "comment" || v.verb !== "add" || !v.message || v.from?.id === pageId || daTraLoiBL.has(v.comment_id)) return;
+  daTraLoiBL.add(v.comment_id);
+  const bai = await fbApi(`${v.post_id}?fields=message`, "GET");
+  const { cong_khai, nhan_rieng, an_binh_luan } = await soanBinhLuan(v.message, bai.message);
+  console.log("[bình luận]", v.comment_id, "công khai:", !!cong_khai, "nhắn riêng:", !!nhan_rieng, "ẩn:", !!an_binh_luan);
+  const loi = (r, viec) => r.error && console.error(`[bình luận] lỗi ${viec}:`, JSON.stringify(r.error));
+  if (an_binh_luan) loi(await fbApi(v.comment_id, "POST", { is_hidden: true }), "ẩn");
+  if (cong_khai) loi(await fbApi(`${v.comment_id}/comments`, "POST", { message: cong_khai }), "trả lời công khai");
+  if (nhan_rieng) loi(await fbApi("me/messages", "POST", { recipient: { comment_id: v.comment_id }, message: { text: nhan_rieng, metadata: BOT_TAG } }), "nhắn riêng");
+}
+
 // ---------- Trang kiểm tra kết nối fanpage: /kiemtra?key=<VERIFY_TOKEN> (thêm &dangky=1 để đăng ký lại) ----------
 app.get("/kiemtra", async (req, res) => {
   if (!okKey(req.query.key)) return res.sendStatus(403);
   const g = (path, opts) =>
     fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, opts).then((r) => r.json());
   const out = {};
-  if (req.query.dangky) out.dang_ky_lai = await g("me/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_echoes,standby,messaging_handovers", { method: "POST" });
+  if (req.query.dangky) out.dang_ky_lai = await g(`me/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_echoes,standby,messaging_handovers${process.env.BINH_LUAN ? ",feed" : ""}`, { method: "POST" });
   // debug_token cho biết mã này thuộc trang nào (profile_id) mà không cần quyền đọc trang; chỉ trả ID, không trả mã
   const d = (await g(`debug_token?input_token=${PAGE_ACCESS_TOKEN}`)).data ?? {};
   out.trang = { id_trang: d.profile_id, ung_dung: d.app_id, loai_ma: d.type, hop_le: d.is_valid, quyen: d.scopes };
@@ -531,6 +572,7 @@ app.get("/thu", (req, res) => (okKey(req.query.key) ? res.send(TEST_PAGE) : res.
 app.post("/thu", async (req, res) => {
   const { key, id, text, quay } = req.body || {};
   if (!okKey(key) || !id || !text) return res.sendStatus(403);
+  if (req.body.binh_luan) return res.json(await soanBinhLuan(String(text), String(req.body.bai_viet || "")).catch((e) => ({ loi: e.message })));
   if (quay) Object.assign(user(id), { history: [], pausedUntil: 0 });
   if (user(id).pausedUntil > Date.now()) return res.json({ replies: [], note: "AI đang tạm dừng với khách này (đã chuyển người thật). Bấm Cuộc chat mới." });
   const replies = [];
