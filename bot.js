@@ -68,7 +68,7 @@ KẾT THÚC: nếu shop vừa cảm ơn hoặc vừa nói câu chốt mà khách
 ĐƠN ĐANG GIAO: nếu LỊCH SỬ CHAT có tin "mã vận đơn ... đã được vận chuyển" mà CHƯA có tin "đã được giao thành công" sau đó, thì đơn trước còn đang trên đường. Khách nhắn lại tên gói, giá, tin quảng cáo (ví dụ "*2kg Sâu Canxi #180k miễn ship"), hỏi đơn, hay nhắn chung chung: KHÔNG lên đơn mới, KHÔNG hỏi địa chỉ, chỉ trả lời "Dạ đơn của anh/chị đang được vận chuyển rồi ạ, mình đợi giúp em nhé." Chỉ coi là đơn MỚI khi khách nói rõ muốn mua thêm (ví dụ "gửi thêm", "lấy thêm", "đặt nữa", "5kg nữa").
 Khách chọn mua mà CHƯA nói "địa chỉ cũ"/"như cũ" và chưa gửi SĐT, địa chỉ trong cuộc chat này: nếu LỊCH SỬ CHAT hoặc KHÁCH QUEN có địa chỉ cũ thì KHÔNG được chốt ngay, KHÔNG gọi luu_don; hỏi xác nhận một câu, ví dụ "Dạ em gửi 2kg (180k miễn ship) về địa chỉ cũ Thôn Phú Hòa, Yên Hòa, Cẩm Xuyên, Hà Tĩnh đúng không ạ?". Khách đồng ý (ừ, đúng, ok, like…) thì mới gọi luu_don và nói câu chốt; khách đổi địa chỉ thì xin địa chỉ mới.
 KHÔNG BAO GIỜ nói shop sẽ gọi điện, không dặn khách "chú ý điện thoại", "để ý máy" (shop không gọi khách). Khách cảm ơn, like hoặc gửi nhãn dán sau khi đã chốt đơn: chỉ trả lời "Dạ em cảm ơn anh/chị ạ!".
-Khách nói "địa chỉ cũ", "như cũ", "như lần trước", "gửi như lần trước": nếu LỊCH SỬ CHAT hoặc KHÁCH QUEN có số điện thoại và địa chỉ thì gọi luu_don với thông tin đó trước; dù có hay không, trả lời đúng câu "Dạ! Để em chuẩn bị và gửi luôn ạ." rồi dừng, KHÔNG hỏi lại số điện thoại hay địa chỉ (nhân viên tự tra thông tin cũ).
+Khách nói "địa chỉ cũ", "như cũ", "như lần trước", "gửi như lần trước", hoặc nhắc là đã mua/đã cho thông tin rồi ("mua rồi mà", "mua 2 lần rồi", "bạn còn địa chỉ chứ", "có số rồi mà"): nếu LỊCH SỬ CHAT hoặc KHÁCH QUEN có số điện thoại và địa chỉ thì gọi luu_don với thông tin đó trước; dù có hay không, trả lời đúng câu "Dạ! Để em chuẩn bị và gửi luôn ạ." rồi dừng, KHÔNG hỏi lại số điện thoại hay địa chỉ (nhân viên tự tra thông tin cũ).
 1. Trả lời thẳng câu khách hỏi.
 2. Một điểm hay của sản phẩm hợp với nhu cầu khách (ví dụ: giàu đạm và canxi tự nhiên, sấy lạnh không chất bảo quản, giữ nguyên con nên gà/chim thích mổ). Không hứa chữa bệnh hay tăng trưởng vượt trội.
 3. Một câu hỏi dẫn tới chốt đơn: hỏi khách nuôi bao nhiêu con để tư vấn số kg, hoặc gợi ý gói cụ thể (2kg trở lên được miễn ship nên có lợi hơn), hoặc hỏi lấy mấy kg.
@@ -199,17 +199,22 @@ const khachQuen = (k) =>
   k.don.map((d) => `${d.ngay}: ${d.noi_dung}`).join("; ") + ".";
 
 // ---------- Ảnh sản phẩm (thư mục anh/) ----------
+// Tin có số điện thoại hoặc chữ địa chỉ
+const THONG_TIN = /0\d[\d .]{7,11}\d|xã|phường|huyện|quận|tỉnh|thôn|xóm|khu phố|thị trấn|số nhà|(^|\s)ấp\s/i;
 // Đọc ~20 tin gần nhất giữa khách và fanpage (gồm tin nhân viên/AI khác) để bot nối tiếp được
 async function lichSuChat(id) {
   if (!PAGE_ACCESS_TOKEN) return null;
   try {
-    const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/conversations?platform=messenger&user_id=${id}&fields=messages.limit(20){message,from,created_time}&access_token=${PAGE_ACCESS_TOKEN}`).then((x) => x.json());
+    const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/conversations?platform=messenger&user_id=${id}&fields=messages.limit(100){message,from,created_time}&access_token=${PAGE_ACCESS_TOKEN}`).then((x) => x.json());
     if (r.error) { console.log("[lịch sử chat] không đọc được:", r.error.message); return null; }
-    const msgs = (r.data?.[0]?.messages?.data ?? []).filter((m) => m.message).reverse();
-    console.log("[lịch sử chat] đọc được", msgs.length, "tin của khách", id);
+    const all = (r.data?.[0]?.messages?.data ?? []).filter((m) => m.message).reverse();
+    // Khách quen: SĐT, địa chỉ thường nằm ở đơn cũ, xa hơn 20 tin gần nhất, nên nhặt riêng các tin đó
+    const cu = all.slice(0, -20).filter((m) => m.from?.id === id && THONG_TIN.test(m.message)).slice(-6);
+    const msgs = [...cu, ...all.slice(-20)];
+    console.log("[lịch sử chat] đọc được", all.length, "tin của khách", id, cu.length ? `(+${cu.length} tin SĐT/địa chỉ cũ)` : "");
     if (!msgs.length) return null;
     const dong = msgs.map((m) => `${m.created_time.slice(0, 10)} ${m.from?.id === id ? "Khách" : "Shop"}: ${m.message}`);
-    return "LỊCH SỬ CHAT TRƯỚC ĐÓ với khách này (cũ đến mới, tin cuối có thể là tin khách vừa gửi). Đọc để nối tiếp, không hỏi lại điều đã có, không chào lại nếu đang dở chuyện:\n" + dong.join("\n");
+    return "LỊCH SỬ CHAT TRƯỚC ĐÓ với khách này (cũ đến mới, tin cuối có thể là tin khách vừa gửi; vài tin đầu có thể là SĐT, địa chỉ khách để lại ở đơn cũ). Đọc để nối tiếp, không hỏi lại điều đã có, không chào lại nếu đang dở chuyện:\n" + dong.join("\n");
   } catch (e) { console.log("[lịch sử chat] lỗi:", e.message); return null; }
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
