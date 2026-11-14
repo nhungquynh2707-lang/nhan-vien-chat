@@ -24,7 +24,9 @@ for (const [k, v] of Object.entries({ VERIFY_TOKEN, ANTHROPIC_API_KEY: process.e
 if (!PAGE_ACCESS_TOKEN || !APP_SECRET) console.warn("Chưa có PAGE_ACCESS_TOKEN / APP_SECRET: chưa nhận tin từ fanpage, chỉ dùng được trang /thu");
 
 const client = new Anthropic();
-const SHOP_INFO = fs.readFileSync(new URL("./shop.txt", import.meta.url), "utf8");
+// SHOP_FILE: dùng chung code cho page khác (mỗi page một service Railway). Page khác không có ảnh sâu nên bỏ gui_anh.
+const SHOP_FILE = process.env.SHOP_FILE || "shop.txt";
+const SHOP_INFO = fs.readFileSync(new URL("./" + SHOP_FILE, import.meta.url), "utf8");
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
@@ -166,7 +168,7 @@ const TOOLS = [
       properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
     },
   },
-];
+].filter((t) => SHOP_FILE === "shop.txt" || t.name !== "gui_anh");
 
 const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
 function tinhTongDon({ items }) {
