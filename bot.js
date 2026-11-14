@@ -222,6 +222,8 @@ const ANH = {
 // ---------- Gọi Claude ----------
 const CHOT_TEXT = "Dạ! Để em chuẩn bị và gửi luôn ạ.";
 const HANDOFF_TEXT = process.env.HANDOFF_TEXT || "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
+// HANDOFF_SILENT=1: chuyển nhân viên mà không nhắn gì cho khách
+const baoChuyen = (send, id, text) => (process.env.HANDOFF_SILENT ? undefined : send(id, text || HANDOFF_TEXT));
 
 // Ảnh khách gửi: đưa link ảnh cho Claude tự xem (đọc được SĐT, địa chỉ viết tay, ảnh hàng lỗi)
 const ANH_KHACH = /\[Khách gửi ảnh: (\S+)\]/g;
@@ -270,7 +272,7 @@ async function reply(id, customerText, send = sendFb) {
     const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 
     if (res.stop_reason === "refusal") {
-      await send(id, HANDOFF_TEXT);
+      await baoChuyen(send, id);
       return pause(id, "AI từ chối trả lời");
     }
     const calls = res.content.filter((b) => b.type === "tool_use");
@@ -291,11 +293,11 @@ async function reply(id, customerText, send = sendFb) {
     if (!calls.length) {
       saveState();
       if (text.includes("[KHÔNG TRẢ LỜI]")) return console.log("[im lặng] khách", id, "chỉ cảm ơn/like");
-      return send(id, text || HANDOFF_TEXT);
+      return text ? send(id, text) : baoChuyen(send, id);
     }
     const handoff = calls.find((c) => c.name === "chuyen_nhan_vien");
     if (handoff) {
-      await send(id, text || HANDOFF_TEXT);
+      await baoChuyen(send, id, text);
       // Dừng lâu (HANDOFF_HOURS) chỉ với khách đã mua: bot từng lưu đơn, hoặc lịch sử chat có đơn/vận đơn
       const daMua = !!u.khach || /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i.test(u.ctx || "");
       return pause(id, (handoff.input?.ly_do || "khách cần người thật") + (daMua ? " (khách đã mua)" : ""), daMua ? HANDOFF_MS : PAUSE_MS);
@@ -319,7 +321,7 @@ async function reply(id, customerText, send = sendFb) {
     });
     for (const img of pending) await send(id, img);
   }
-  await send(id, HANDOFF_TEXT);
+  await baoChuyen(send, id);
   pause(id, "AI không hoàn thành được câu trả lời");
 }
 
