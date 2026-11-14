@@ -221,7 +221,7 @@ const ANH = {
 
 // ---------- Gọi Claude ----------
 const CHOT_TEXT = "Dạ! Để em chuẩn bị và gửi luôn ạ.";
-const HANDOFF_TEXT = "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
+const HANDOFF_TEXT = process.env.HANDOFF_TEXT || "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
 
 // Ảnh khách gửi: đưa link ảnh cho Claude tự xem (đọc được SĐT, địa chỉ viết tay, ảnh hàng lỗi)
 const ANH_KHACH = /\[Khách gửi ảnh: (\S+)\]/g;
