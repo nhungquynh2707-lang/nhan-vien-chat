@@ -279,6 +279,7 @@ async function reply(id, customerText, send = sendFb) {
     if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
       await send(id, CHOT_TEXT);
+      messages[messages.length - 1] = { role: "assistant", content: CHOT_TEXT }; // bỏ tool_use không có kết quả, kẻo tin sau của khách bị lỗi 400
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
       return console.log("[chốt đơn] khách", id);
