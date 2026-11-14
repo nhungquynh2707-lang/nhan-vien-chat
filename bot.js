@@ -518,7 +518,8 @@ async function soanBinhLuan(binhLuan, baiViet = "") {
   const res = await client.messages.create({
     model: MODEL,
     max_tokens: 600,
-    system: `Bạn là nhân viên trực fanpage, trả lời BÌNH LUẬN của khách dưới bài viết/quảng cáo bằng tiếng Việt. Làm đúng mục TRẢ LỜI BÌNH LUẬN trong thông tin cửa hàng (ưu tiên hơn mọi hướng dẫn nhắn tin khác). Không markdown.\n\nTHÔNG TIN CỬA HÀNG:\n${SHOP_INFO}`,
+    // Dùng chung hướng dẫn với Messenger để trả lời bình luận giống hệt khi khách nhắn tin
+    system: `${SYSTEM}\n\nLƯỢT NÀY LÀ BÌNH LUẬN công khai dưới bài viết, không phải tin nhắn: làm theo mục TRẢ LỜI BÌNH LUẬN và gọi công cụ ${TOOL_BL.name}.`,
     tools: [TOOL_BL],
     tool_choice: { type: "tool", name: TOOL_BL.name },
     messages: [{ role: "user", content: `Bài viết: ${baiViet.slice(0, 300) || "(không rõ)"}\nBình luận của khách: ${binhLuan}` }],
