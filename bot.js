@@ -207,7 +207,14 @@ async function lichSuChat(id) {
   try {
     const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/conversations?platform=messenger&user_id=${id}&fields=messages.limit(100){message,from,created_time}&access_token=${PAGE_ACCESS_TOKEN}`).then((x) => x.json());
     if (r.error) { console.log("[lịch sử chat] không đọc được:", r.error.message); return null; }
-    const all = (r.data?.[0]?.messages?.data ?? []).filter((m) => m.message).reverse();
+    // Facebook có thể trả ít hơn 100 tin một lần: đọc tiếp trang sau cho đủ
+    let trang = r.data?.[0]?.messages;
+    const raw = [...(trang?.data ?? [])];
+    while (trang?.paging?.next && raw.length < 100) {
+      trang = await fetch(trang.paging.next).then((x) => x.json());
+      raw.push(...(trang.data ?? []));
+    }
+    const all = raw.filter((m) => m.message).reverse();
     // Khách quen: SĐT, địa chỉ thường nằm ở đơn cũ, xa hơn 20 tin gần nhất, nên nhặt riêng các tin đó
     const cu = all.slice(0, -20).filter((m) => m.from?.id === id && THONG_TIN.test(m.message)).slice(-6);
     const msgs = [...cu, ...all.slice(-20)];
