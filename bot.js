@@ -291,7 +291,9 @@ async function reply(id, customerText, send = sendFb) {
     const handoff = calls.find((c) => c.name === "chuyen_nhan_vien");
     if (handoff) {
       await send(id, text || HANDOFF_TEXT);
-      return pause(id, handoff.input?.ly_do || "khách cần người thật", HANDOFF_MS);
+      // Dừng lâu (HANDOFF_HOURS) chỉ với khách đã mua: bot từng lưu đơn, hoặc lịch sử chat có đơn/vận đơn
+      const daMua = !!u.khach || /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i.test(u.ctx || "");
+      return pause(id, (handoff.input?.ly_do || "khách cần người thật") + (daMua ? " (khách đã mua)" : ""), daMua ? HANDOFF_MS : PAUSE_MS);
     }
     if (text) await send(id, text);
     const pending = [];
