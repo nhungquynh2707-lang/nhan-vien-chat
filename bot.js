@@ -503,15 +503,14 @@ async function giveBack(id) {
 // ---------- Trả lời bình luận (bật bằng BINH_LUAN=1, page cần đăng ký trường "feed" và quyền pages_manage_engagement) ----------
 const TOOL_BL = {
   name: "tra_loi_binh_luan",
-  description: "Trả lời một bình luận của khách dưới bài viết. Để trống cả hai nếu không nên trả lời.",
+  description: "Trả lời một bình luận của khách dưới bài viết, đúng như khi khách nhắn câu đó qua Messenger.",
   input_schema: {
     type: "object",
     properties: {
-      cong_khai: { type: "string", description: "Câu trả lời hiện công khai dưới bình luận. Rỗng nếu không trả lời." },
-      nhan_rieng: { type: "string", description: "Tin nhắn riêng gửi vào Messenger của khách. Rỗng nếu không nhắn." },
-      an_binh_luan: { type: "boolean", description: "true nếu bình luận có số điện thoại hoặc địa chỉ của khách" },
+      tra_loi: { type: "string", description: "Câu bot sẽ nhắn nếu khách gửi bình luận này qua Messenger. Chuỗi rỗng nếu không nên trả lời." },
+      co_sdt_dia_chi: { type: "boolean", description: "true nếu bình luận có số điện thoại hoặc địa chỉ của khách" },
     },
-    required: ["cong_khai", "nhan_rieng", "an_binh_luan"],
+    required: ["tra_loi", "co_sdt_dia_chi"],
   },
 };
 async function soanBinhLuan(binhLuan, baiViet = "") {
@@ -524,19 +523,25 @@ async function soanBinhLuan(binhLuan, baiViet = "") {
     tool_choice: { type: "tool", name: TOOL_BL.name },
     messages: [{ role: "user", content: `Bài viết: ${baiViet.slice(0, 300) || "(không rõ)"}\nBình luận của khách: ${binhLuan}` }],
   });
-  return res.content.find((b) => b.type === "tool_use")?.input ?? {};
+  const r = res.content.find((b) => b.type === "tool_use")?.input ?? {};
+  // Mô hình đôi khi trả '""' hoặc [KHÔNG TRẢ LỜI] thay cho chuỗi rỗng: coi là không trả lời
+  const traLoi = String(r.tra_loi || "").replace("[KHÔNG TRẢ LỜI]", "").replace(/^["'\s]+|["'\s]+$/g, "");
+  return { traLoi, coThongTin: !!r.co_sdt_dia_chi };
 }
 const daTraLoiBL = new Set(); // shortcut: chỉ nhớ trong bộ nhớ, khởi động lại giữa lúc Facebook gửi lại sự kiện thì có thể trả lời 2 lần (hiếm)
 async function binhLuan(pageId, v) {
   if (v.item !== "comment" || v.verb !== "add" || !v.message || v.from?.id === pageId || daTraLoiBL.has(v.comment_id)) return;
   daTraLoiBL.add(v.comment_id);
   const bai = await fbApi(`${v.post_id}?fields=message`, "GET");
-  const { cong_khai, nhan_rieng, an_binh_luan } = await soanBinhLuan(v.message, bai.message);
-  console.log("[bình luận]", v.comment_id, "công khai:", !!cong_khai, "nhắn riêng:", !!nhan_rieng, "ẩn:", !!an_binh_luan);
+  const { traLoi, coThongTin } = await soanBinhLuan(v.message, bai.message);
+  console.log("[bình luận]", v.comment_id, traLoi ? "trả lời" : "bỏ qua", coThongTin ? "(có SĐT/địa chỉ, ẩn)" : "");
+  if (!traLoi) return;
   const loi = (r, viec) => r.error && console.error(`[bình luận] lỗi ${viec}:`, JSON.stringify(r.error));
-  if (an_binh_luan) loi(await fbApi(v.comment_id, "POST", { is_hidden: true }), "ẩn");
-  if (cong_khai) loi(await fbApi(`${v.comment_id}/comments`, "POST", { message: cong_khai }), "trả lời công khai");
-  if (nhan_rieng) loi(await fbApi("me/messages", "POST", { recipient: { comment_id: v.comment_id }, message: { text: nhan_rieng, metadata: BOT_TAG } }), "nhắn riêng");
+  // Có SĐT/địa chỉ: ẩn để giữ kín thông tin khách, chép thông tin vào tin nhắn riêng để nhân viên và bot Messenger thấy
+  if (coThongTin) loi(await fbApi(v.comment_id, "POST", { is_hidden: true }), "ẩn");
+  loi(await fbApi(`${v.comment_id}/comments`, "POST", { message: coThongTin ? "Dạ em nhắn tin cho chị rồi ạ" : traLoi }), "trả lời công khai");
+  const rieng = coThongTin ? `Dạ em nhận được thông tin chị để lại: ${v.message}\n${traLoi}` : traLoi;
+  loi(await fbApi("me/messages", "POST", { recipient: { comment_id: v.comment_id }, message: { text: rieng, metadata: BOT_TAG } }), "nhắn riêng");
 }
 
 // ---------- Trang kiểm tra kết nối fanpage: /kiemtra?key=<VERIFY_TOKEN> (thêm &dangky=1 để đăng ký lại) ----------
