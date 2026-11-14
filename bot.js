@@ -145,6 +145,11 @@ const TOOLS = [
     },
   },
   {
+    name: "gui_video",
+    description: "Gửi video hướng dẫn cách đeo sụn nâng mũi (dùng kẹp đưa sụn vào mũi) cho khách.",
+    input_schema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
     name: "luu_don",
     description: "Lưu đơn đã chốt vào sổ khách quen để lần sau khách mua lại không phải hỏi lại. Gọi đúng một lần khi chốt đơn.",
     strict: true,
@@ -170,7 +175,7 @@ const TOOLS = [
       properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
     },
   },
-].filter((t) => SHOP_FILE === "shop.txt" || t.name !== "gui_anh");
+].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
 
 const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
 function tinhTongDon({ items }) {
@@ -324,6 +329,10 @@ async function reply(id, customerText, send = sendFb) {
             pending.push(...(ANH[c.input.loai] ?? []).map((f) => ({ image: `${BASE_URL}/anh/${f}` })));
             return { type: "tool_result", tool_use_id: c.id, content: "Đã gửi ảnh cho khách." };
           }
+          if (c.name === "gui_video") {
+            pending.push({ video: `${BASE_URL}/anh/hc-cach-deo.mp4` });
+            return { type: "tool_result", tool_use_id: c.id, content: "Đã gửi video cho khách. Không gửi lại video này nữa." };
+          }
           const out = c.name === "luu_don" ? luuDon(u, c.input) : tinhTongDon(c.input);
           return { type: "tool_result", tool_use_id: c.id, content: JSON.stringify(out) };
         } catch (e) {
@@ -349,8 +358,9 @@ async function graph(body) {
   else if (body.message) console.log("[đã gửi] tin cho khách", body.recipient.id);
 }
 async function sendFb(id, text) {
-  if (text.image) {
-    return graph({ recipient: { id }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url: text.image, is_reusable: true } }, metadata: BOT_TAG } });
+  if (text.image || text.video) {
+    const type = text.video ? "video" : "image";
+    return graph({ recipient: { id }, messaging_type: "RESPONSE", message: { attachment: { type, payload: { url: text[type], is_reusable: true } }, metadata: BOT_TAG } });
   }
   for (let i = 0; i < text.length; i += 1900) {
     await graph({ recipient: { id }, messaging_type: "RESPONSE", message: { text: text.slice(i, i + 1900), metadata: BOT_TAG } });
@@ -579,7 +589,7 @@ const TEST_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" co
 <form id="f"><input id="t" placeholder="Nhắn như khách…" autocomplete="off"><button>Gửi</button></form>
 <p><button id="r">Cuộc chat mới</button> <button id="q">Khách cũ quay lại</button></p><script>
 const key=new URLSearchParams(location.search).get("key");let id="thu-"+Date.now();
-const add=(t,c)=>{const d=document.createElement("div");d.className=c;if(t.image){const i=document.createElement("img");i.src=t.image;i.style.maxWidth="220px";d.appendChild(i)}else d.textContent=t;log.appendChild(d)};
+const add=(t,c)=>{const d=document.createElement("div");d.className=c;if(t.image||t.video){const i=document.createElement(t.video?"video":"img");i.src=t.image||t.video;i.controls=true;i.style.maxWidth="220px";d.appendChild(i)}else d.textContent=t;log.appendChild(d)};
 let quay=false;r.onclick=()=>{id="thu-"+Date.now();log.textContent=""};
 q.onclick=()=>{quay=true;log.textContent="";add("(Cùng khách, lịch sử chat đã xóa như khi quay lại hôm sau)","n")};
 f.onsubmit=async e=>{e.preventDefault();const text=t.value.trim();if(!text)return;t.value="";add(text,"k");
