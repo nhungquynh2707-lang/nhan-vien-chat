@@ -456,7 +456,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (msg?.is_echo) {
         // Tin do fanpage gửi. Không có nhãn của AI = người thật đang trả lời khách
-        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id)) pause(ev.recipient.id, "chủ shop tự trả lời");
+        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, "chủ shop tự trả lời");
         continue;
       }
       const id = ev.sender?.id;
@@ -470,7 +470,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (!msg) continue;
       // Nhân viên trả lời qua Sapo (tin do trang gửi, không có nhãn AI): AI nhường khách này
-      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id)) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
+      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
       // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
       if (ev.sender?.id) user(ev.sender.id).khachNhanLuc = Date.now();
       if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
@@ -481,10 +481,10 @@ app.post("/webhook", (req, res) => {
 
 // Tin trang gửi ra có phải người thật gõ không. Máy tự trả lời (lời chào quảng cáo, trả lời tự động)
 // gửi ngay trong vài giây sau tin khách, hoặc gửi trước khi khách nhắn gì (mở đầu cuộc chat từ quảng cáo).
-function nguoiThat(id) {
+function nguoiThat(id, app) {
   const t = Date.now() - (user(id).khachNhanLuc || 0);
   const ok = t > 3000 && t < IDLE_RESET_MS; // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
-  if (!ok) console.log("[bỏ qua] tin tự động của trang gửi khách", id);
+  if (!ok) console.log("[bỏ qua] tin tự động của trang gửi khách", id, app ? "từ ứng dụng " + app : "");
   return ok;
 }
 
