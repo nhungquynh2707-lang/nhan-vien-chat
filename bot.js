@@ -587,15 +587,18 @@ app.get("/kiemtra", async (req, res) => {
 const SDT = /0\d[\d .]{7,11}\d/g;
 let hoc = { trang_thai: "chưa chạy" };
 async function docHopThu(n, truoc) {
-  const page = await fbApi("me?fields=id,name", "GET");
-  if (page.error) throw new Error("Không đọc được trang: " + page.error.message);
+  // debug_token cho ID trang mà không cần quyền pages_read_engagement (như /kiemtra); tên trang lấy từ người tham gia cuộc chat
+  const d = (await fbApi(`debug_token?input_token=${PAGE_ACCESS_TOKEN}`, "GET")).data ?? {};
+  if (!d.profile_id) throw new Error("Không xác định được trang từ PAGE_ACCESS_TOKEN");
+  const page = { id: d.profile_id, name: "" };
   const ds = [];
-  let url = `me/conversations?platform=messenger&limit=10&fields=messages.limit(30){message,from,created_time}`;
+  let url = `me/conversations?platform=messenger&limit=10&fields=participants,messages.limit(30){message,from,created_time}`;
   // shortcut: đọc tối đa 300 cuộc chat gần nhất rồi chọn n cuộc; page cần học xa hơn thì tăng giới hạn này
   for (let trang = 0; url && ds.length < 300 && trang < 30; trang++) {
     const r = await fbApi(url, "GET");
     if (r.error) throw new Error("Không đọc được hộp thư: " + r.error.message);
     for (const c of r.data ?? []) {
+      page.name ||= c.participants?.data?.find((p) => p.id === page.id)?.name || "";
       const tin = (c.messages?.data ?? []).filter((m) => m.message && (!truoc || m.created_time < truoc)).reverse();
       if (tin.length >= 2) ds.push(tin);
     }
