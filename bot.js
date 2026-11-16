@@ -581,6 +581,72 @@ app.get("/kiemtra", async (req, res) => {
   res.json(out);
 });
 
+// ---------- Tự soạn kịch bản từ hộp thư: /hoc?key=<VERIFY_TOKEN>&chay=1[&n=40][&truoc=YYYY-MM-DD] rồi mở /hoc?key=... xem kết quả ----------
+// Đọc các cuộc chat cũ của page (ưu tiên cuộc chat khách đã để SĐT/địa chỉ = đã chốt đơn), nhờ Claude viết bản nháp theo shop-mau.txt.
+// truoc=: chỉ học tin trước ngày đó (bỏ tin bot tự trả lời). Bản nháp phải được người xem lại trước khi dùng.
+const SDT = /0\d[\d .]{7,11}\d/g;
+let hoc = { trang_thai: "chưa chạy" };
+async function docHopThu(n, truoc) {
+  const page = await fbApi("me?fields=id,name", "GET");
+  if (page.error) throw new Error("Không đọc được trang: " + page.error.message);
+  const ds = [];
+  let url = `me/conversations?platform=messenger&limit=10&fields=messages.limit(30){message,from,created_time}`;
+  // shortcut: đọc tối đa 300 cuộc chat gần nhất rồi chọn n cuộc; page cần học xa hơn thì tăng giới hạn này
+  for (let trang = 0; url && ds.length < 300 && trang < 30; trang++) {
+    const r = await fbApi(url, "GET");
+    if (r.error) throw new Error("Không đọc được hộp thư: " + r.error.message);
+    for (const c of r.data ?? []) {
+      const tin = (c.messages?.data ?? []).filter((m) => m.message && (!truoc || m.created_time < truoc)).reverse();
+      if (tin.length >= 2) ds.push(tin);
+    }
+    url = r.paging?.next ? r.paging.next.replace(/^https:\/\/graph\.facebook\.com\/[^/]+\//, "").replace(/&?access_token=[^&]*/, "") : null;
+  }
+  const chot = (t) => t.some((m) => m.from?.id !== page.id && THONG_TIN.test(m.message));
+  const chon = [...ds.filter(chot), ...ds.filter((t) => !chot(t))].slice(0, n);
+  const vanBan = chon.map((t, i) => `--- Cuộc chat ${i + 1}${chot(t) ? " (khách đã để SĐT/địa chỉ)" : ""} ---\n` +
+    t.map((m) => `${m.from?.id === page.id ? "Shop" : "Khách"}: ${m.message.slice(0, 300).replace(SDT, "[SĐT]")}`).join("\n")).join("\n\n");
+  return { ten: page.name, so: chon.length, soChot: chon.filter(chot).length, vanBan };
+}
+async function soanKichBan(n, truoc) {
+  const { ten, so, soChot, vanBan } = await docHopThu(n, truoc);
+  if (!so) throw new Error("Không có cuộc chat nào để học");
+  hoc = { trang_thai: `đang soạn từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)...`, luc: new Date().toISOString() };
+  const mau = fs.readFileSync(new URL("./shop-mau.txt", import.meta.url), "utf8");
+  const res = await client.beta.messages.stream({
+    model: process.env.HOC_MODEL || "claude-opus-5-5",
+    max_tokens: 32000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: `Bạn viết kịch bản bán hàng cho một bot trả lời tin nhắn Messenger của fanpage "${ten}". Đọc các cuộc chat thật giữa nhân viên shop và khách, rồi điền ĐÚNG theo mẫu dưới đây (giữ nguyên tiêu đề các mục, thay mọi chỗ [...]).
+- Chỉ dùng điều có trong các cuộc chat: sản phẩm, giá, phí ship, hãng giao, thanh toán, đổi trả, câu khách hay hỏi. Giá có nhiều mức khác nhau thì lấy mức nhân viên báo gần đây nhất và ghi chú lại.
+- Chép nguyên văn những câu nhân viên hay dùng (chào, báo giá, xin SĐT địa chỉ, chốt đơn), cách xưng hô, độ dài tin. Bot phải nhắn giống nhân viên thật.
+- Mục CÂU HỎI THƯỜNG GẶP: lấy 10–20 câu khách hỏi nhiều nhất, kèm câu nhân viên đã trả lời.
+- Chỗ nào các cuộc chat không cho biết hoặc mâu thuẫn: ghi [CẦN HỎI CHỦ SHOP: ...]. Không bịa.
+- Tin "Shop:" có thể là tin tự động (báo đơn, quảng cáo, ưu đãi): bỏ qua khi học giọng nhân viên.
+- Không chép tên, số điện thoại, địa chỉ của khách nào vào kịch bản.
+- Chỉ trả về nội dung kịch bản, không giải thích thêm.
+
+MẪU:
+${mau}`,
+    messages: [{ role: "user", content: `${so} cuộc chat gần đây của page "${ten}":\n\n${vanBan}` }],
+  }).finalMessage();
+  if (res.stop_reason === "refusal") throw new Error("Claude từ chối soạn (" + (res.stop_details?.category || "không rõ") + ")");
+  const ketQua = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  if (VOL) fs.writeFileSync(`${VOL}/kich-ban-nhap.txt`, ketQua);
+  console.log("[học hộp thư] xong:", so, "cuộc chat,", res.usage?.input_tokens, "token vào,", res.usage?.output_tokens, "token ra");
+  hoc = { trang_thai: `xong, học từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)`, luc: new Date().toISOString(), ket_qua: ketQua };
+}
+app.get("/hoc", (req, res) => {
+  if (!okKey(req.query.key)) return res.sendStatus(403);
+  if (req.query.chay && !hoc.trang_thai.startsWith("đang")) {
+    const n = Math.min(Number(req.query.n) || 40, 80);
+    const truoc = /^\d{4}-\d{2}-\d{2}$/.test(req.query.truoc || "") ? req.query.truoc : "";
+    hoc = { trang_thai: "đang đọc hộp thư...", luc: new Date().toISOString() };
+    soanKichBan(n, truoc).catch((e) => { console.error("[học hộp thư] lỗi:", e.message); hoc = { trang_thai: "lỗi: " + e.message, luc: new Date().toISOString() }; });
+  }
+  res.type("text/plain; charset=utf-8").send(`Trạng thái: ${hoc.trang_thai} (${hoc.luc || ""})\n\n${hoc.ket_qua || ""}`);
+});
+
 // ---------- Trang chạy thử: https://<địa-chỉ>/thu?key=<VERIFY_TOKEN> ----------
 const TEST_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Chạy thử nhân viên chat</title><style>body{font:15px system-ui;max-width:560px;margin:0 auto;padding:16px}
