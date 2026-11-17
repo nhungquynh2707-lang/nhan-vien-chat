@@ -28,6 +28,8 @@ const client = new Anthropic();
 const SHOP_FILE = process.env.SHOP_FILE || "shop.txt";
 const SHOP_INFO = fs.readFileSync(new URL("./" + SHOP_FILE, import.meta.url), "utf8");
 // Ảnh sản phẩm của shop thuê: ANH_FILE=anh/<shop>/anh.json dạng {"loai": {"mo_ta": "...", "anh": ["<shop>/a.jpg"]}} (đường dẫn trong anh/)
+// CHOT_TU_VIET=1: khi chốt đơn bot tự viết câu tổng đơn theo kịch bản shop (thay câu chốt cố định)
+const CHOT_TU_VIET = !!process.env.CHOT_TU_VIET;
 const ANH_SHOP = process.env.ANH_FILE ? JSON.parse(fs.readFileSync(new URL("./" + process.env.ANH_FILE, import.meta.url), "utf8")) : null;
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
@@ -161,11 +163,12 @@ const TOOLS = [
     input_schema: {
       type: "object",
       additionalProperties: false,
-      required: ["sdt", "dia_chi", "noi_dung"],
+      required: ["sdt", "dia_chi", "noi_dung", ...(CHOT_TU_VIET ? ["loi_chot"] : [])],
       properties: {
         sdt: { type: "string", description: "Số điện thoại người nhận" },
         dia_chi: { type: "string", description: "Địa chỉ giao hàng đầy đủ" },
         noi_dung: { type: "string", description: "Hàng đã đặt và tổng tiền, ví dụ: 2kg, 180.000đ miễn ship" },
+        ...(CHOT_TU_VIET ? { loi_chot: { type: "string", description: "Tin nhắn chốt đơn gửi khách, theo đúng mẫu câu tổng đơn trong kịch bản shop" } } : {}),
       },
     },
   },
@@ -302,11 +305,12 @@ async function reply(id, customerText, send = sendFb) {
     const luu = calls.find((c) => c.name === "luu_don");
     if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
-      await send(id, CHOT_TEXT);
+      const chotText = (CHOT_TU_VIET && luu?.input?.loi_chot?.trim()) || CHOT_TEXT;
+      await send(id, chotText);
       // Ghi kết quả công cụ + câu chốt vào lịch sử: tránh lỗi 400 ở tin sau và để bot biết đơn đã lưu, không lưu lại
       if (calls.length) {
         messages.push({ role: "user", content: calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: c === luu ? "Đã lưu đơn. Không gọi luu_don nữa trừ khi khách đổi thông tin." : "Bỏ qua." })) });
-        messages.push({ role: "assistant", content: CHOT_TEXT });
+        messages.push({ role: "assistant", content: chotText });
       }
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
