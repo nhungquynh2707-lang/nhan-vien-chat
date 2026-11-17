@@ -168,7 +168,7 @@ const TOOLS = [
         sdt: { type: "string", description: "Số điện thoại người nhận" },
         dia_chi: { type: "string", description: "Địa chỉ giao hàng đầy đủ" },
         noi_dung: { type: "string", description: "Hàng đã đặt và tổng tiền, ví dụ: 2kg, 180.000đ miễn ship" },
-        ...(CHOT_TU_VIET ? { loi_chot: { type: "string", description: "Tin nhắn chốt đơn gửi khách, theo đúng mẫu câu tổng đơn trong kịch bản shop" } } : {}),
+        ...(CHOT_TU_VIET ? { loi_chot: { type: "string", description: "Tin nhắn chốt đơn gửi khách: câu TỔNG ĐƠN theo đúng mẫu trong kịch bản shop (số chiếc, size/loại, tổng tiền). KHÔNG dùng câu \"Dạ! Để em chuẩn bị và gửi luôn ạ.\"" } } : {}),
       },
     },
   },
