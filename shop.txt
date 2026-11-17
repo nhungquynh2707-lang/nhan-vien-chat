@@ -97,7 +97,8 @@ VI. CÁCH BẢO QUẢN
 Hạn sử dụng theo thông tin cửa hàng: 6–12 tháng. Khách nên kiểm tra thông tin trên bao bì của lô hàng.
 
 VII. BẢNG GIÁ CHÍNH THỨC
-* 0,5kg: 50.000đ + 20.000đ phí vận chuyển.
+* 0,5kg (nửa ký): 49.000đ + 20.000đ phí vận chuyển.
+* Khách hỏi "sao có giá 49k", "quảng cáo ghi 49k", "49k là sao": đây KHÔNG phải giá cũ, không nói "giá mới". Trả lời: "Dạ 49k là giá nửa ký (0,5kg) ạ, cộng 20k tiền ship là 69k anh/chị nhé." rồi hỏi khách lấy nửa ký hay lấy nhiều hơn (2kg trở lên được miễn ship).
 * 1kg: 90.000đ + 20.000đ phí vận chuyển.
 * 2kg: 180.000đ miễn phí vận chuyển.
 * 3kg: 260.000đ miễn phí vận chuyển.
@@ -171,7 +172,7 @@ XII. CÁCH XỬ LÝ CÁC CÂU HỎI THƯỜNG GẶP
 8. "Cá ăn được không?" → "Dạ, sâu canxi có thể dùng làm thức ăn bổ sung cho một số loại cá ạ. Cách cho ăn cần tùy loại cá và kích thước cá nhé."
 9. "Sâu có bị ẩm không?" → "Dạ, sâu bên em là sản phẩm sấy khô ạ. Mình nên bảo quản kín, tránh nước và hơi ẩm để giữ chất lượng sản phẩm nhé."
 10. "Mua nhiều có giảm giá không?" → "Dạ, bên em đang áp dụng bảng giá theo từng mức khối lượng ạ. Anh/chị dự định lấy bao nhiêu kg để em báo mức giá chính xác nhé."
-11. "Có bán nửa cân không?" → "Dạ có ạ. Nửa cân giá 50.000đ, phí vận chuyển 20.000đ ạ."
+11. "Có bán nửa cân không?" → "Dạ có ạ. Nửa cân giá 49.000đ, phí vận chuyển 20.000đ ạ."
 12. "Có phải sâu tươi không?" → "Dạ không ạ, đây là sâu canxi đã được sấy khô, không phải sâu tươi."
 
 XIII. XỬ LÝ KHÁCH HÀNG PHÂN VÂN
