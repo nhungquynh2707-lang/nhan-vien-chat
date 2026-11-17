@@ -272,7 +272,7 @@ async function noiDungClaude(text) {
 }
 
 // ---------- Google Sheet cho chủ shop tự sửa: SHEET_URL = link Sheet (chia sẻ "Bất kỳ ai có đường liên kết" được xem) ----------
-// Cột A = mục, cột B = nội dung. Dòng "Bật bot" = Không thì bot im. Các dòng khác thêm vào đầu mỗi cuộc chat mới.
+// Cột A = mục, cột B = nội dung (trống thì bỏ qua), cột C = hướng dẫn cho chủ shop (bot bỏ qua). Dòng "Bật bot" = Không thì bot im. Các dòng khác thêm vào đầu mỗi cuộc chat mới.
 let sheet = { bat: true, text: "" };
 function docCsv(s) {
   const rows = [[""]];
@@ -291,7 +291,7 @@ function docSheetCsv(csv) {
   const bat = rows.find((r) => /^bật bot|^bat bot/i.test(r[0]));
   return {
     bat: !bat || !/^(không|khong|tắt|tat|no|0)$/i.test(bat[1] || ""),
-    text: rows.filter((r) => r !== bat).map((r) => "- " + r.filter(Boolean).join(": ")).join("\n"),
+    text: rows.filter((r) => r !== bat && r[1]).map((r) => `- ${r[0]}: ${r[1]}`).join("\n"), // chỉ cột A, B; cột C trở đi là hướng dẫn cho chủ shop
   };
 }
 async function capNhatSheet() {
@@ -316,7 +316,7 @@ async function reply(id, customerText, send = sendFb) {
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
   if (!messages.length) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
-    const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này):\n" + sheet.text;
+    const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước):\n" + sheet.text;
     u.ctx = [capNhat, u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
   }
   messages.push({ role: "user", content: await noiDungClaude(customerText) });
