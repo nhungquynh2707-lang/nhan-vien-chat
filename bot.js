@@ -27,6 +27,8 @@ const client = new Anthropic();
 // SHOP_FILE: dùng chung code cho page khác (mỗi page một service Railway). Page khác không có ảnh sâu nên bỏ gui_anh.
 const SHOP_FILE = process.env.SHOP_FILE || "shop.txt";
 const SHOP_INFO = fs.readFileSync(new URL("./" + SHOP_FILE, import.meta.url), "utf8");
+// Ảnh sản phẩm của shop thuê: ANH_FILE=anh/<shop>/anh.json dạng {"loai": {"mo_ta": "...", "anh": ["<shop>/a.jpg"]}} (đường dẫn trong anh/)
+const ANH_SHOP = process.env.ANH_FILE ? JSON.parse(fs.readFileSync(new URL("./" + process.env.ANH_FILE, import.meta.url), "utf8")) : null;
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
@@ -136,13 +138,15 @@ const TOOLS = [
   },
   {
     name: "gui_anh",
-    description: "Gửi ảnh thật của sản phẩm cho khách. san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói.",
+    description: "Gửi ảnh thật của sản phẩm cho khách. " + (ANH_SHOP
+      ? Object.entries(ANH_SHOP).map(([k, v]) => `${k}: ${v.mo_ta}`).join(". ")
+      : "san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
     strict: true,
     input_schema: {
       type: "object",
       additionalProperties: false,
       required: ["loai"],
-      properties: { loai: { type: "string", enum: ["san_pham", "can_canh", "dong_goi"] } },
+      properties: { loai: { type: "string", enum: ANH_SHOP ? Object.keys(ANH_SHOP) : ["san_pham", "can_canh", "dong_goi"] } },
     },
   },
   {
@@ -176,7 +180,7 @@ const TOOLS = [
       properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
     },
   },
-].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
+].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" || !!ANH_SHOP : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
 
 const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
 function tinhTongDon({ items }) {
@@ -231,7 +235,7 @@ async function lichSuChat(id) {
   } catch (e) { console.log("[lịch sử chat] lỗi:", e.message); return null; }
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
-const ANH = {
+const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) => [k, v.anh])) : {
   san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
   can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
   dong_goi: ["tui-zip.jpg"],
@@ -602,28 +606,32 @@ async function docHopThu(n, truoc) {
   if (!d.profile_id) throw new Error("Không xác định được trang từ PAGE_ACCESS_TOKEN");
   const page = { id: d.profile_id, name: "" };
   const ds = [];
-  let url = `me/conversations?platform=messenger&limit=10&fields=participants,messages.limit(30){message,from,created_time}`;
+  let url = `me/conversations?platform=messenger&limit=10&fields=participants,messages.limit(30){message,from,created_time,attachments{image_data{url}}}`;
+  const anhCua = (m) => (m.attachments?.data ?? []).map((a) => a.image_data?.url).filter(Boolean);
+  const anh = []; // ảnh shop đã gửi khách (để chọn ảnh sản phẩm cho gui_anh)
   // shortcut: đọc tối đa 300 cuộc chat gần nhất rồi chọn n cuộc; page cần học xa hơn thì tăng giới hạn này
   for (let trang = 0; url && ds.length < 300 && trang < 30; trang++) {
     const r = await fbApi(url, "GET");
     if (r.error) throw new Error("Không đọc được hộp thư: " + r.error.message);
     for (const c of r.data ?? []) {
       page.name ||= c.participants?.data?.find((p) => p.id === page.id)?.name || "";
-      const tin = (c.messages?.data ?? []).filter((m) => m.message && (!truoc || m.created_time < truoc)).reverse();
+      const tin = (c.messages?.data ?? []).filter((m) => (m.message || anhCua(m).length) && (!truoc || m.created_time < truoc)).reverse();
       if (tin.length >= 2) ds.push(tin);
+      tin.forEach((m, i) => m.from?.id === page.id && anhCua(m).forEach((url) =>
+        anh.push({ url, khach_hoi: tin.slice(0, i).findLast((x) => x.from?.id !== page.id && x.message)?.message?.slice(0, 120).replace(SDT, "[SĐT]") || "" })));
     }
     url = r.paging?.next ? r.paging.next.replace(/^https:\/\/graph\.facebook\.com\/[^/]+\//, "").replace(/&?access_token=[^&]*/, "") : null;
   }
-  const chot = (t) => t.some((m) => m.from?.id !== page.id && THONG_TIN.test(m.message));
+  const chot = (t) => t.some((m) => m.from?.id !== page.id && THONG_TIN.test(m.message || ""));
   const chon = [...ds.filter(chot), ...ds.filter((t) => !chot(t))].slice(0, n);
   const vanBan = chon.map((t, i) => `--- Cuộc chat ${i + 1}${chot(t) ? " (khách đã để SĐT/địa chỉ)" : ""} ---\n` +
-    t.map((m) => `${m.from?.id === page.id ? "Shop" : "Khách"}: ${m.message.slice(0, 300).replace(SDT, "[SĐT]")}`).join("\n")).join("\n\n");
-  return { ten: page.name, so: chon.length, soChot: chon.filter(chot).length, vanBan };
+    t.map((m) => `${m.from?.id === page.id ? "Shop" : "Khách"}: ${(m.message || "").slice(0, 300).replace(SDT, "[SĐT]")}${anhCua(m).length ? ` [gửi ${anhCua(m).length} ảnh]` : ""}`).join("\n")).join("\n\n");
+  return { ten: page.name, so: chon.length, soChot: chon.filter(chot).length, vanBan, anh: anh.slice(0, 60) };
 }
 async function soanKichBan(n, truoc) {
-  const { ten, so, soChot, vanBan } = await docHopThu(n, truoc);
+  const { ten, so, soChot, vanBan, anh } = await docHopThu(n, truoc);
   if (!so) throw new Error("Không có cuộc chat nào để học");
-  hoc = { trang_thai: `đang soạn từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)...`, luc: new Date().toISOString() };
+  hoc = { trang_thai: `đang soạn từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)...`, luc: new Date().toISOString(), anh };
   const mau = fs.readFileSync(new URL("./shop-mau.txt", import.meta.url), "utf8");
   const res = await client.beta.messages.stream({
     model: process.env.HOC_MODEL || "claude-opus-5-5",
@@ -637,6 +645,7 @@ async function soanKichBan(n, truoc) {
 - Chỗ nào các cuộc chat không cho biết hoặc mâu thuẫn: ghi [CẦN HỎI CHỦ SHOP: ...]. Không bịa.
 - Tin "Shop:" có thể là tin tự động (báo đơn, quảng cáo, ưu đãi): bỏ qua khi học giọng nhân viên.
 - Không chép tên, số điện thoại, địa chỉ của khách nào vào kịch bản.
+- "[gửi N ảnh]" ở tin Shop là nhân viên gửi ảnh: ghi vào kịch bản khách hỏi gì thì nhân viên gửi ảnh (ví dụ hỏi mẫu, màu, size, ảnh thật) để bot cũng gửi ảnh lúc đó.
 - Chỉ trả về nội dung kịch bản, không giải thích thêm.
 
 MẪU:
@@ -647,10 +656,12 @@ ${mau}`,
   const ketQua = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
   if (VOL) fs.writeFileSync(`${VOL}/kich-ban-nhap.txt`, ketQua);
   console.log("[học hộp thư] xong:", so, "cuộc chat,", res.usage?.input_tokens, "token vào,", res.usage?.output_tokens, "token ra");
-  hoc = { trang_thai: `xong, học từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)`, luc: new Date().toISOString(), ket_qua: ketQua };
+  hoc = { trang_thai: `xong, học từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)`, luc: new Date().toISOString(), ket_qua: ketQua, anh };
 }
 app.get("/hoc", (req, res) => {
   if (!okKey(req.query.key)) return res.sendStatus(403);
+  // &anh=1: danh sách ảnh shop đã gửi khách (link Facebook có hạn) để chọn ảnh sản phẩm cho gui_anh
+  if (req.query.anh) return res.json(hoc.anh ?? []);
   if (req.query.chay && !hoc.trang_thai.startsWith("đang")) {
     const n = Math.min(Number(req.query.n) || 40, 80);
     const truoc = /^\d{4}-\d{2}-\d{2}$/.test(req.query.truoc || "") ? req.query.truoc : "";
