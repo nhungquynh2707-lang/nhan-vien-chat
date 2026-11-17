@@ -303,7 +303,12 @@ async function reply(id, customerText, send = sendFb) {
     const calls = res.content.filter((b) => b.type === "tool_use");
     // Đã có đủ SĐT + địa chỉ (lưu đơn) hoặc bot đã nói câu chốt: gửi câu chốt rồi nhường Sapo/nhân viên lên đơn
     const luu = calls.find((c) => c.name === "luu_don");
-    if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
+    // CHOT_TU_VIET: bot lỡ viết câu chốt cố định mà không gọi luu_don → nhắc lại để có câu tổng đơn (chưa gửi gì cho khách)
+    if (CHOT_TU_VIET && !calls.length && text.includes(CHOT_TEXT.slice(4, 20)) && step < 4) {
+      messages.push({ role: "user", content: "(Hệ thống, khách không thấy tin này) Shop này không dùng câu chốt cố định. Đủ SĐT và địa chỉ thì gọi luu_don với loi_chot là câu tổng đơn theo kịch bản; còn thiếu thì chỉ hỏi đúng phần thiếu." });
+      continue;
+    }
+    if (luu ||(!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
       const chotText = (CHOT_TU_VIET && luu?.input?.loi_chot?.trim()) || CHOT_TEXT;
       await send(id, chotText);
