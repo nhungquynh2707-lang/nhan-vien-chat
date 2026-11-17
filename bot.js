@@ -41,8 +41,9 @@ const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
 // Chuyển nhân viên (khiếu nại, đổi hàng...) dừng lâu hơn nếu đặt HANDOFF_HOURS; không đặt thì như PAUSE_HOURS
 const HANDOFF_MS = Number(process.env.HANDOFF_HOURS || PAUSE_HOURS) * 3600 * 1000;
 // NHUONG_NHAN_VIEN=1: nhân viên tự trả lời khách CHƯA có đơn thì bot không dừng PAUSE_HOURS;
-// mỗi lượt tin của khách bot chờ DEBOUNCE_MS (10 giây), nhân viên chưa trả lời thì bot trả lời
+// mỗi lượt tin của khách chưa có đơn bot chờ NHUONG_GIAY (mặc định 60 giây), nhân viên chưa trả lời thì bot trả lời
 const NHUONG_NV = !!process.env.NHUONG_NHAN_VIEN;
+const NHUONG_MS = (Number(process.env.NHUONG_GIAY) || 60) * 1000;
 const CO_DON = /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i;
 
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
@@ -465,7 +466,7 @@ function enqueue(id, text, layQuyenSau = false) {
       .finally(() => { if (!buffers.has(id) && queues.get(id) === tail) return giveBack(id); })
       .catch(() => {});
     queues.set(id, tail);
-  }, DEBOUNCE_MS);
+  }, NHUONG_NV && !user(id).khach && !user(id).coDon ? NHUONG_MS : DEBOUNCE_MS);
   buffers.set(id, b);
 }
 async function handle(id, text) {
@@ -597,7 +598,7 @@ const fbApi = (path, method, body) =>
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
 async function takeThread(id, text) {
-  if (NHUONG_NV) return enqueue(id, text, true); // chờ 10 giây xem nhân viên có trả lời không rồi mới giành
+  if (NHUONG_NV) return enqueue(id, text, true); // chờ xem nhân viên có trả lời không rồi mới giành
   if (await layQuyen(id)) enqueue(id, text);
 }
 async function layQuyen(id) {
