@@ -1,0 +1,10 @@
+{
+  "san_pham": {
+    "mo_ta": "3 ảnh túi đeo thú cưng (bé đeo túi, bộ túi kèm dây đeo chéo và dây dắt). Gửi khi khách hỏi giá, hỏi mẫu, xin xem hình, ảnh thật, màu, chất vải",
+    "anh": ["thucung/tui-1.jpg", "thucung/tui-bo.jpg", "thucung/tui-2.jpg"]
+  },
+  "bang_size": {
+    "mo_ta": "ảnh bảng size S/M/L/XL theo cân nặng bé. Gửi khi khách hỏi size hoặc nói cân nặng bé",
+    "anh": ["thucung/bang-size.jpg"]
+  }
+}
