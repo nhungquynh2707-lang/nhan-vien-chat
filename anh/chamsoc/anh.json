@@ -1,0 +1,10 @@
+{
+  "san_pham": {
+    "mo_ta": "3 ảnh khẩu trang sưởi mũi (người đeo, 3 mức nhiệt, nhỏ gọn bằng bàn tay). Gửi khi khách hỏi giá, hỏi thông tin, hỏi bán ở đâu, xin ảnh sản phẩm, nhắn Hi/Xin giá",
+    "anh": ["chamsoc/deo-mat.jpg", "chamsoc/3-muc-nhiet.jpg", "chamsoc/nho-gon.jpg"]
+  },
+  "trong_hop": {
+    "mo_ta": "ảnh trong hộp có gì (khẩu trang, cáp sạc USB-C, túi đựng, hướng dẫn). Gửi khi khách hỏi trong hộp có gì, có kèm sạc không, cách dùng",
+    "anh": ["chamsoc/trong-hop.jpg"]
+  }
+}
