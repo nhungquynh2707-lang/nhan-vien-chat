@@ -36,6 +36,10 @@ const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt 
 const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
 // Chuyển nhân viên (khiếu nại, đổi hàng...) dừng lâu hơn nếu đặt HANDOFF_HOURS; không đặt thì như PAUSE_HOURS
 const HANDOFF_MS = Number(process.env.HANDOFF_HOURS || PAUSE_HOURS) * 3600 * 1000;
+// NHUONG_NHAN_VIEN=1: nhân viên tự trả lời khách CHƯA có đơn thì bot không dừng PAUSE_HOURS;
+// mỗi lượt tin của khách bot chờ DEBOUNCE_MS (10 giây), nhân viên chưa trả lời thì bot trả lời
+const NHUONG_NV = !!process.env.NHUONG_NHAN_VIEN;
+const CO_DON = /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i;
 
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
 let state = { users: {} };
@@ -49,6 +53,18 @@ function saveState() {
 }
 function user(id) {
   return (state.users[id] ??= { history: [], pausedUntil: 0, lastActive: 0 });
+}
+// Người thật (hoặc ứng dụng khác) vừa nhắn khách
+function nvTraLoi(id, reason, text = "") {
+  const u = user(id);
+  if (CO_DON.test(text)) u.coDon = true;
+  if (NHUONG_NV && !u.khach && !u.coDon) {
+    u.nvLuc = Date.now();
+    u.history = []; // lượt sau đọc lại lịch sử Facebook để biết nhân viên đã nói gì
+    saveState();
+    return console.log(`[nhân viên trả lời] khách ${id} chưa có đơn: bot không dừng, chờ tin sau`);
+  }
+  pause(id, reason);
 }
 function pause(id, reason, ms = PAUSE_MS) {
   const u = user(id);
@@ -372,16 +388,21 @@ const typing = (id) => graph({ recipient: { id }, sender_action: "typing_on" });
 // Gom tin nhắn liên tiếp và xử lý lần lượt từng khách
 const buffers = new Map();
 const queues = new Map();
-function enqueue(id, text) {
-  const b = buffers.get(id) ?? { parts: [] };
+function enqueue(id, text, layQuyenSau = false) {
+  const b = buffers.get(id) ?? { parts: [], tu: Date.now() };
   b.parts.push(text);
+  if (layQuyenSau) b.layQuyen = true;
   clearTimeout(b.timer);
   b.timer = setTimeout(() => {
     buffers.delete(id);
     const joined = b.parts.join("\n");
     const prev = queues.get(id) ?? Promise.resolve();
     // Chỉ trả hội thoại cho Sapo khi khách không còn tin nào đang chờ, kẻo tin sau gửi không đi
-    const tail = prev.then(() => handle(id, joined))
+    const tail = prev.then(async () => {
+      if (NHUONG_NV && (user(id).nvLuc || 0) > b.tu) return console.log(`[nhường] nhân viên đã trả lời khách ${id}, bot không trả lời lượt này`);
+      if (b.layQuyen && !(await layQuyen(id))) return;
+      return handle(id, joined);
+    })
       .finally(() => { if (!buffers.has(id) && queues.get(id) === tail) return giveBack(id); })
       .catch(() => {});
     queues.set(id, tail);
@@ -457,7 +478,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (msg?.is_echo) {
         // Tin do fanpage gửi. Không có nhãn của AI = người thật đang trả lời khách
-        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, "chủ shop tự trả lời");
+        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) nvTraLoi(ev.recipient.id, "chủ shop tự trả lời", msg.text);
         continue;
       }
       const id = ev.sender?.id;
@@ -471,7 +492,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (!msg) continue;
       // Nhân viên trả lời qua Sapo (tin do trang gửi, không có nhãn AI): AI nhường khách này
-      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
+      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) nvTraLoi(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`, msg.text); continue; }
       // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
       if (ev.sender?.id) user(ev.sender.id).khachNhanLuc = Date.now();
       if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
@@ -506,14 +527,18 @@ const fbApi = (path, method, body) =>
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
 async function takeThread(id, text) {
+  if (NHUONG_NV) return enqueue(id, text, true); // chờ 10 giây xem nhân viên có trả lời không rồi mới giành
+  if (await layQuyen(id)) enqueue(id, text);
+}
+async function layQuyen(id) {
   const owner = await fbApi(`me/thread_owner?recipient=${id}`, "GET");
   console.log("[standby] chủ hội thoại hiện tại:", JSON.stringify(owner));
   const took = await fbApi("me/take_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
   console.log("[standby] giành quyền:", JSON.stringify(took));
-  if (!took.success) return;
+  if (!took.success) return false;
   const prevApp = owner.data?.[0]?.thread_owner?.app_id;
   if (prevApp) borrowed.set(id, prevApp);
-  enqueue(id, text);
+  return true;
 }
 async function giveBack(id) {
   const app = borrowed.get(id);
