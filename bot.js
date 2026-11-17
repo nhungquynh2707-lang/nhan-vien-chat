@@ -271,6 +271,43 @@ async function noiDungClaude(text) {
   return [{ type: "text", text: chu }, ...anh];
 }
 
+// ---------- Google Sheet cho chủ shop tự sửa: SHEET_URL = link Sheet (chia sẻ "Bất kỳ ai có đường liên kết" được xem) ----------
+// Cột A = mục, cột B = nội dung (trống thì bỏ qua), cột C = hướng dẫn cho chủ shop (bot bỏ qua). Dòng "Bật bot" = Không thì bot im. Các dòng khác thêm vào đầu mỗi cuộc chat mới.
+let sheet = { bat: true, text: "" };
+function docCsv(s) {
+  const rows = [[""]];
+  for (let i = 0, q = false; i < s.length; i++) {
+    const c = s[i], r = rows.at(-1);
+    if (q) { if (c === '"' && s[i + 1] === '"') { r[r.length - 1] += '"'; i++; } else if (c === '"') q = false; else r[r.length - 1] += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") r.push("");
+    else if (c === "\n") rows.push([""]);
+    else if (c !== "\r") r[r.length - 1] += c;
+  }
+  return rows;
+}
+function docSheetCsv(csv) {
+  const rows = docCsv(csv).map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean) && !/^(mục|muc)$/i.test(r[0]));
+  const bat = rows.find((r) => /^bật bot|^bat bot/i.test(r[0]));
+  return {
+    bat: !bat || !/^(không|khong|tắt|tat|no|0)$/i.test(bat[1] || ""),
+    text: rows.filter((r) => r !== bat && r[1]).map((r) => `- ${r[0]}: ${r[1]}`).join("\n"), // chỉ cột A, B; cột C trở đi là hướng dẫn cho chủ shop
+  };
+}
+async function capNhatSheet() {
+  const id = process.env.SHEET_URL?.match(/\/d\/([\w-]+)/)?.[1];
+  if (!id) return;
+  const gid = process.env.SHEET_URL.match(/gid=(\d+)/)?.[1] || "0";
+  try {
+    const r = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    if (!r.ok) throw new Error("HTTP " + r.status + " (Sheet đã chia sẻ cho 'Bất kỳ ai có đường liên kết' chưa?)");
+    const moi = docSheetCsv(await r.text());
+    if (moi.text !== sheet.text || moi.bat !== sheet.bat) console.log("[google sheet] cập nhật:", moi.bat ? "bot bật" : "bot TẮT", "|", moi.text.length, "ký tự");
+    sheet = moi;
+  } catch (e) { console.error("[google sheet] lỗi đọc, giữ bản cũ:", e.message); }
+}
+if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000); }
+
 async function reply(id, customerText, send = sendFb) {
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
@@ -279,7 +316,8 @@ async function reply(id, customerText, send = sendFb) {
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
   if (!messages.length) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
-    u.ctx = [u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
+    const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước):\n" + sheet.text;
+    u.ctx = [capNhat, u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
   }
   messages.push({ role: "user", content: await noiDungClaude(customerText) });
 
@@ -408,6 +446,7 @@ function enqueue(id, text) {
 }
 async function handle(id, text) {
   if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  if (!sheet.bat) return; // chủ shop tắt bot trong Google Sheet
   // Chốt đơn quá 30 phút: nhường Sapo/nhân viên (trong ngày). Sang hôm sau bot trả lời lại như khách mới.
   const sauChot = Date.now() - (user(id).chotLuc || 0);
   if (sauChot > 30 * 60000 && sauChot < IDLE_RESET_MS) { user(id).chotLuc = 0; return pause(id, "đã chốt đơn quá 30 phút, nhường Sapo"); }
