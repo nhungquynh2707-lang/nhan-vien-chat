@@ -334,7 +334,7 @@ async function reply(id, customerText, send = sendFb) {
   if (!messages.length) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
     const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước)." +
-      " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản." +
+      " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản; riêng khi khách đã gửi đủ SĐT và địa chỉ thì KHÔNG gửi tin chào, chốt đơn luôn theo kịch bản." +
       " Mục \"Câu chốt đơn\" (nếu có) là mẫu loi_chot khi chốt đơn: giữ nguyên câu chữ, chỉ thay số lượng, loại/size, tổng tiền cho đúng đơn." +
       " Các mục về cách nói chuyện (xưng hô, cách trả lời, không được nói) thì làm đúng như vậy:\n" + sheet.text;
     u.ctx = [capNhat, u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
