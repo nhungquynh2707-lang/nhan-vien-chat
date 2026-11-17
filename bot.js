@@ -425,9 +425,19 @@ async function handle(id, text) {
 const app = express();
 // Ảnh sản phẩm công khai; cho phép trang khác tải về (CORS) để dùng làm biểu tượng ứng dụng
 app.use("/anh", (_req, res, next) => { res.set("Access-Control-Allow-Origin", "*"); next(); }, express.static(fileURLToPath(new URL("./anh", import.meta.url))));
-// Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu
-app.get("/chinh-sach-rieng-tu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/chinh-sach.html", import.meta.url))));
-app.get("/xoa-du-lieu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/xoa-du-lieu.html", import.meta.url))));
+// Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu.
+// Shop thuê: đặt SHOP_NAME (tùy chọn SHOP_LIEN_HE) trên Railway; không đặt thì giữ nội dung BBF.
+function trangShop(html, ten = process.env.SHOP_NAME, lh = process.env.SHOP_LIEN_HE) {
+  if (!ten) return html;
+  return html
+    .replace(/Sâu Sấy Canxi BBF . Lô [^<]*/, `${ten} – ${lh || "nhắn tin cho fanpage trên Messenger"}.`)
+    .replace(/Sâu Sấy Canxi BBF . Lot [^<]*/, `${ten} – ${lh || "message the Page on Messenger"}.`)
+    .replace(/\r?\n<li>[^\n]*(0327729823|327 729 823)[^\n]*<\/li>/g, "") // bỏ cách "gọi Zalo BBF" ở trang xóa dữ liệu
+    .replace("làm một trong hai cách:", "làm như sau:").replace("), either:", "):").replace(" Facebook Page, or</li>", " Facebook Page.</li>")
+    .replaceAll("Sâu Sấy Canxi BBF", ten);
+}
+for (const [duong, file] of [["/chinh-sach-rieng-tu", "chinh-sach.html"], ["/xoa-du-lieu", "xoa-du-lieu.html"]])
+  app.get(duong, (_req, res) => res.type("html").send(trangShop(fs.readFileSync(new URL("./trang/" + file, import.meta.url), "utf8"))));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 app.get("/webhook", (req, res) => {
