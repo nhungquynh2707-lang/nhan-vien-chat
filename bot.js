@@ -424,14 +424,19 @@ async function reply(id, customerText, send = sendFb) {
 }
 
 // ---------- Facebook Messenger ----------
-async function graph(body) {
+async function graph(body, guiLai = false) {
   const base = process.env.GRAPH_URL || "https://graph.facebook.com"; // GRAPH_URL chỉ dùng khi chạy thử
   const r = await fetch(`${base}/${GRAPH_VERSION}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
+  if (!r.ok) {
+    const loi = await r.text();
+    // 2018300: ứng dụng khác (tin tự động) đang giữ cuộc chat → giành lại rồi gửi lại một lần (trả lại sau lượt trả lời)
+    if (!guiLai && loi.includes("2018300") && body.recipient?.id && (await layQuyen(body.recipient.id))) return graph(body, true);
+    console.error("Lỗi gửi tin Facebook:", r.status, loi);
+  }
   else if (body.message) console.log("[đã gửi] tin cho khách", body.recipient.id);
 }
 async function sendFb(id, text) {
@@ -593,7 +598,7 @@ function noiDung(msg) {
 
 // Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
 const fbApi = (path, method, body) =>
-  fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
+  fetch(`${process.env.GRAPH_URL || "https://graph.facebook.com"}/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
     method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
