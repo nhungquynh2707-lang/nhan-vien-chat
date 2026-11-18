@@ -136,7 +136,7 @@ const TOOLS = [
   },
   {
     name: "gui_anh",
-    description: "Gửi ảnh thật của sản phẩm cho khách. san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói.",
+    description: "Gửi ảnh thật của sản phẩm cho khách. san_pham: sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói.",
     strict: true,
     input_schema: {
       type: "object",
