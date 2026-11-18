@@ -40,6 +40,11 @@ const IDLE_RESET_MS = 24 * 3600 * 1000; // khách quay lại sau 24h thì bắt 
 const PAUSE_MS = Number(PAUSE_HOURS) * 3600 * 1000;
 // Chuyển nhân viên (khiếu nại, đổi hàng...) dừng lâu hơn nếu đặt HANDOFF_HOURS; không đặt thì như PAUSE_HOURS
 const HANDOFF_MS = Number(process.env.HANDOFF_HOURS || PAUSE_HOURS) * 3600 * 1000;
+// NHUONG_NHAN_VIEN=1: nhân viên tự trả lời khách CHƯA có đơn thì bot không dừng PAUSE_HOURS;
+// mỗi lượt tin của khách chưa có đơn bot chờ NHUONG_GIAY (mặc định 60 giây), nhân viên chưa trả lời thì bot trả lời
+const NHUONG_NV = !!process.env.NHUONG_NHAN_VIEN;
+const NHUONG_MS = (Number(process.env.NHUONG_GIAY) || 60) * 1000;
+const CO_DON = /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i;
 
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
 let state = { users: {} };
@@ -53,6 +58,18 @@ function saveState() {
 }
 function user(id) {
   return (state.users[id] ??= { history: [], pausedUntil: 0, lastActive: 0 });
+}
+// Người thật (hoặc ứng dụng khác) vừa nhắn khách
+function nvTraLoi(id, reason, text = "") {
+  const u = user(id);
+  if (CO_DON.test(text)) u.coDon = true;
+  if (NHUONG_NV && !u.khach && !u.coDon) {
+    u.nvLuc = Date.now();
+    u.history = []; // lượt sau đọc lại lịch sử Facebook để biết nhân viên đã nói gì
+    saveState();
+    return console.log(`[nhân viên trả lời] khách ${id} chưa có đơn: bot không dừng, chờ tin sau`);
+  }
+  pause(id, reason);
 }
 function pause(id, reason, ms = PAUSE_MS) {
   const u = user(id);
@@ -142,7 +159,7 @@ const TOOLS = [
     name: "gui_anh",
     description: "Gửi ảnh thật của sản phẩm cho khách. " + (ANH_SHOP
       ? Object.entries(ANH_SHOP).map(([k, v]) => `${k}: ${v.mo_ta}`).join(". ")
-      : "san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
+      : "san_pham: 2 ảnh sâu khô bốc trên tay. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
     strict: true,
     input_schema: {
       type: "object",
@@ -239,7 +256,7 @@ async function lichSuChat(id) {
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
 const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) => [k, v.anh])) : {
-  san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
+  san_pham: ["tren-tay-1.jpg", "tren-tay-2.jpg"],
   can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
   dong_goi: ["tui-zip.jpg"],
 };
@@ -308,16 +325,21 @@ async function capNhatSheet() {
 }
 if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000); }
 
-async function reply(id, customerText, send = sendFb) {
+async function reply(id, customerText, sendMot = sendFb) {
+  // Kịch bản có thể tách một lượt thành nhiều tin bằng [TÁCH TIN] (ví dụ: lời chào rồi câu trả lời riêng)
+  const send = async (id, t) => {
+    if (typeof t !== "string" || !t.includes("[TÁCH TIN]")) return sendMot(id, t);
+    for (const phan of t.split("[TÁCH TIN]").map((x) => x.trim()).filter(Boolean)) await sendMot(id, phan);
+  };
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
   u.lastActive = Date.now();
   const messages = u.history;
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
   if (!messages.length) {
-    const ls = send === sendFb ? await lichSuChat(id) : null;
+    const ls = sendMot === sendFb ? await lichSuChat(id) : null;
     const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước)." +
-      " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản." +
+      " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản; riêng khi khách đã gửi đủ SĐT và địa chỉ thì KHÔNG gửi tin chào, chốt đơn luôn theo kịch bản." +
       " Mục \"Câu chốt đơn\" (nếu có) là mẫu loi_chot khi chốt đơn: giữ nguyên câu chữ, chỉ thay số lượng, loại/size, tổng tiền cho đúng đơn." +
       " Các mục về cách nói chuyện (xưng hô, cách trả lời, không được nói) thì làm đúng như vậy:\n" + sheet.text;
     u.ctx = [capNhat, u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
@@ -407,14 +429,19 @@ async function reply(id, customerText, send = sendFb) {
 }
 
 // ---------- Facebook Messenger ----------
-async function graph(body) {
+async function graph(body, guiLai = false) {
   const base = process.env.GRAPH_URL || "https://graph.facebook.com"; // GRAPH_URL chỉ dùng khi chạy thử
   const r = await fetch(`${base}/${GRAPH_VERSION}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
+  if (!r.ok) {
+    const loi = await r.text();
+    // 2018300: ứng dụng khác (tin tự động) đang giữ cuộc chat → giành lại rồi gửi lại một lần (trả lại sau lượt trả lời)
+    if (!guiLai && loi.includes("2018300") && body.recipient?.id && (await layQuyen(body.recipient.id))) return graph(body, true);
+    console.error("Lỗi gửi tin Facebook:", r.status, loi);
+  }
   else if (body.message) console.log("[đã gửi] tin cho khách", body.recipient.id);
 }
 async function sendFb(id, text) {
@@ -431,20 +458,25 @@ const typing = (id) => graph({ recipient: { id }, sender_action: "typing_on" });
 // Gom tin nhắn liên tiếp và xử lý lần lượt từng khách
 const buffers = new Map();
 const queues = new Map();
-function enqueue(id, text) {
-  const b = buffers.get(id) ?? { parts: [] };
+function enqueue(id, text, layQuyenSau = false) {
+  const b = buffers.get(id) ?? { parts: [], tu: Date.now() };
   b.parts.push(text);
+  if (layQuyenSau) b.layQuyen = true;
   clearTimeout(b.timer);
   b.timer = setTimeout(() => {
     buffers.delete(id);
     const joined = b.parts.join("\n");
     const prev = queues.get(id) ?? Promise.resolve();
     // Chỉ trả hội thoại cho Sapo khi khách không còn tin nào đang chờ, kẻo tin sau gửi không đi
-    const tail = prev.then(() => handle(id, joined))
+    const tail = prev.then(async () => {
+      if (NHUONG_NV && (user(id).nvLuc || 0) > b.tu) return console.log(`[nhường] nhân viên đã trả lời khách ${id}, bot không trả lời lượt này`);
+      if (b.layQuyen && !(await layQuyen(id))) return;
+      return handle(id, joined);
+    })
       .finally(() => { if (!buffers.has(id) && queues.get(id) === tail) return giveBack(id); })
       .catch(() => {});
     queues.set(id, tail);
-  }, DEBOUNCE_MS);
+  }, NHUONG_NV && !user(id).khach && !user(id).coDon ? NHUONG_MS : DEBOUNCE_MS);
   buffers.set(id, b);
 }
 async function handle(id, text) {
@@ -527,7 +559,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (msg?.is_echo) {
         // Tin do fanpage gửi. Không có nhãn của AI = người thật đang trả lời khách
-        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, "chủ shop tự trả lời");
+        if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) nvTraLoi(ev.recipient.id, "chủ shop tự trả lời", msg.text);
         continue;
       }
       const id = ev.sender?.id;
@@ -541,7 +573,7 @@ app.post("/webhook", (req, res) => {
       const msg = ev.message;
       if (!msg) continue;
       // Nhân viên trả lời qua Sapo (tin do trang gửi, không có nhãn AI): AI nhường khách này
-      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) pause(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`); continue; }
+      if (msg.is_echo) { if (msg.metadata !== BOT_TAG && nguoiThat(ev.recipient.id, msg.app_id)) nvTraLoi(ev.recipient.id, `ứng dụng ${msg.app_id} trả lời khách`, msg.text); continue; }
       // Chỉ giành khi bật GIANH_QUYEN=1, để khách thường vẫn do Sapo trả lời
       if (ev.sender?.id) user(ev.sender.id).khachNhanLuc = Date.now();
       if (!process.env.GIANH_QUYEN || !ev.sender?.id || user(ev.sender.id).pausedUntil > Date.now()) continue;
@@ -552,9 +584,11 @@ app.post("/webhook", (req, res) => {
 
 // Tin trang gửi ra có phải người thật gõ không. Máy tự trả lời (lời chào quảng cáo, trả lời tự động)
 // gửi ngay trong vài giây sau tin khách, hoặc gửi trước khi khách nhắn gì (mở đầu cuộc chat từ quảng cáo).
+// Ứng dụng chỉ gửi tin tự động (không phải nhân viên): 556376998159104 gửi 3 tin chào ngay sau tin khách, có lúc chậm hơn 3 giây
+const APP_TU_DONG = (process.env.APP_TU_DONG ?? "556376998159104").split(",").map((x) => x.trim()).filter(Boolean);
 function nguoiThat(id, app) {
   const t = Date.now() - (user(id).khachNhanLuc || 0);
-  const ok = t > 3000 && t < IDLE_RESET_MS; // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
+  const ok = t > 3000 && t < IDLE_RESET_MS && !APP_TU_DONG.includes(String(app)); // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
   if (!ok) console.log("[bỏ qua] tin tự động của trang gửi khách", id, app ? "từ ứng dụng " + app : "");
   return ok;
 }
@@ -571,19 +605,23 @@ function noiDung(msg) {
 
 // Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
 const fbApi = (path, method, body) =>
-  fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
+  fetch(`${process.env.GRAPH_URL || "https://graph.facebook.com"}/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
     method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
 async function takeThread(id, text) {
+  if (NHUONG_NV) return enqueue(id, text, true); // chờ xem nhân viên có trả lời không rồi mới giành
+  if (await layQuyen(id)) enqueue(id, text);
+}
+async function layQuyen(id) {
   const owner = await fbApi(`me/thread_owner?recipient=${id}`, "GET");
   console.log("[standby] chủ hội thoại hiện tại:", JSON.stringify(owner));
   const took = await fbApi("me/take_thread_control", "POST", { recipient: { id }, metadata: "ai-bot" });
   console.log("[standby] giành quyền:", JSON.stringify(took));
-  if (!took.success) return;
+  if (!took.success) return false;
   const prevApp = owner.data?.[0]?.thread_owner?.app_id;
   if (prevApp) borrowed.set(id, prevApp);
-  enqueue(id, text);
+  return true;
 }
 async function giveBack(id) {
   const app = borrowed.get(id);
