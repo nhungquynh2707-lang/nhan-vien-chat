@@ -27,6 +27,10 @@ const client = new Anthropic();
 // SHOP_FILE: dùng chung code cho page khác (mỗi page một service Railway). Page khác không có ảnh sâu nên bỏ gui_anh.
 const SHOP_FILE = process.env.SHOP_FILE || "shop.txt";
 const SHOP_INFO = fs.readFileSync(new URL("./" + SHOP_FILE, import.meta.url), "utf8");
+// Ảnh sản phẩm của shop thuê: ANH_FILE=anh/<shop>/anh.json dạng {"loai": {"mo_ta": "...", "anh": ["<shop>/a.jpg"]}} (đường dẫn trong anh/)
+// CHOT_TU_VIET=1: khi chốt đơn bot tự viết câu tổng đơn theo kịch bản shop (thay câu chốt cố định)
+const CHOT_TU_VIET = !!process.env.CHOT_TU_VIET;
+const ANH_SHOP = process.env.ANH_FILE ? JSON.parse(fs.readFileSync(new URL("./" + process.env.ANH_FILE, import.meta.url), "utf8")) : null;
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
@@ -153,13 +157,15 @@ const TOOLS = [
   },
   {
     name: "gui_anh",
-    description: "Gửi ảnh thật của sản phẩm cho khách. san_pham: túi 1kg có nhãn + sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói.",
+    description: "Gửi ảnh thật của sản phẩm cho khách. " + (ANH_SHOP
+      ? Object.entries(ANH_SHOP).map(([k, v]) => `${k}: ${v.mo_ta}`).join(". ")
+      : "san_pham: 2 ảnh sâu khô bốc trên tay. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
     strict: true,
     input_schema: {
       type: "object",
       additionalProperties: false,
       required: ["loai"],
-      properties: { loai: { type: "string", enum: ["san_pham", "can_canh", "dong_goi"] } },
+      properties: { loai: { type: "string", enum: ANH_SHOP ? Object.keys(ANH_SHOP) : ["san_pham", "can_canh", "dong_goi"] } },
     },
   },
   {
@@ -174,11 +180,12 @@ const TOOLS = [
     input_schema: {
       type: "object",
       additionalProperties: false,
-      required: ["sdt", "dia_chi", "noi_dung"],
+      required: ["sdt", "dia_chi", "noi_dung", ...(CHOT_TU_VIET ? ["loi_chot"] : [])],
       properties: {
         sdt: { type: "string", description: "Số điện thoại người nhận" },
         dia_chi: { type: "string", description: "Địa chỉ giao hàng đầy đủ" },
         noi_dung: { type: "string", description: "Hàng đã đặt và tổng tiền, ví dụ: 2kg, 180.000đ miễn ship" },
+        ...(CHOT_TU_VIET ? { loi_chot: { type: "string", description: "Tin nhắn chốt đơn gửi khách: câu TỔNG ĐƠN theo đúng mẫu trong kịch bản shop (số chiếc, size/loại, tổng tiền). KHÔNG dùng câu \"Dạ! Để em chuẩn bị và gửi luôn ạ.\"" } } : {}),
       },
     },
   },
@@ -193,7 +200,7 @@ const TOOLS = [
       properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
     },
   },
-].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
+].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" || !!ANH_SHOP : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
 
 const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
 function tinhTongDon({ items }) {
@@ -248,8 +255,8 @@ async function lichSuChat(id) {
   } catch (e) { console.log("[lịch sử chat] lỗi:", e.message); return null; }
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
-const ANH = {
-  san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
+const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) => [k, v.anh])) : {
+  san_pham: ["tren-tay-1.jpg", "tren-tay-2.jpg"],
   can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
   dong_goi: ["tui-zip.jpg"],
 };
@@ -281,6 +288,43 @@ async function noiDungClaude(text) {
   return [{ type: "text", text: chu }, ...anh];
 }
 
+// ---------- Google Sheet cho chủ shop tự sửa: SHEET_URL = link Sheet (chia sẻ "Bất kỳ ai có đường liên kết" được xem) ----------
+// Cột A = mục, cột B = nội dung (trống thì bỏ qua), cột C = hướng dẫn cho chủ shop (bot bỏ qua). Dòng "Bật bot" = Không thì bot im. Các dòng khác thêm vào đầu mỗi cuộc chat mới.
+let sheet = { bat: true, text: "" };
+function docCsv(s) {
+  const rows = [[""]];
+  for (let i = 0, q = false; i < s.length; i++) {
+    const c = s[i], r = rows.at(-1);
+    if (q) { if (c === '"' && s[i + 1] === '"') { r[r.length - 1] += '"'; i++; } else if (c === '"') q = false; else r[r.length - 1] += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") r.push("");
+    else if (c === "\n") rows.push([""]);
+    else if (c !== "\r") r[r.length - 1] += c;
+  }
+  return rows;
+}
+function docSheetCsv(csv) {
+  const rows = docCsv(csv).map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean) && !/^(mục|muc)$/i.test(r[0]));
+  const bat = rows.find((r) => /^bật bot|^bat bot/i.test(r[0]));
+  return {
+    bat: !bat || !/^(không|khong|tắt|tat|no|0)$/i.test(bat[1] || ""),
+    text: rows.filter((r) => r !== bat && r[1]).map((r) => `- ${r[0]}: ${r[1]}`).join("\n"), // chỉ cột A, B; cột C trở đi là hướng dẫn cho chủ shop
+  };
+}
+async function capNhatSheet() {
+  const id = process.env.SHEET_URL?.match(/\/d\/([\w-]+)/)?.[1];
+  if (!id) return;
+  const gid = process.env.SHEET_URL.match(/gid=(\d+)/)?.[1] || "0";
+  try {
+    const r = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`);
+    if (!r.ok) throw new Error("HTTP " + r.status + " (Sheet đã chia sẻ cho 'Bất kỳ ai có đường liên kết' chưa?)");
+    const moi = docSheetCsv(await r.text());
+    if (moi.text !== sheet.text || moi.bat !== sheet.bat) console.log("[google sheet] cập nhật:", moi.bat ? "bot bật" : "bot TẮT", "|", moi.text.length, "ký tự");
+    sheet = moi;
+  } catch (e) { console.error("[google sheet] lỗi đọc, giữ bản cũ:", e.message); }
+}
+if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000); }
+
 async function reply(id, customerText, send = sendFb) {
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
@@ -289,7 +333,11 @@ async function reply(id, customerText, send = sendFb) {
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
   if (!messages.length) {
     const ls = send === sendFb ? await lichSuChat(id) : null;
-    u.ctx = [u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
+    const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước)." +
+      " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản; riêng khi khách đã gửi đủ SĐT và địa chỉ thì KHÔNG gửi tin chào, chốt đơn luôn theo kịch bản." +
+      " Mục \"Câu chốt đơn\" (nếu có) là mẫu loi_chot khi chốt đơn: giữ nguyên câu chữ, chỉ thay số lượng, loại/size, tổng tiền cho đúng đơn." +
+      " Các mục về cách nói chuyện (xưng hô, cách trả lời, không được nói) thì làm đúng như vậy:\n" + sheet.text;
+    u.ctx = [capNhat, u.khach && khachQuen(u.khach), ls].filter(Boolean).join("\n\n") || null;
   }
   messages.push({ role: "user", content: await noiDungClaude(customerText) });
 
@@ -313,13 +361,24 @@ async function reply(id, customerText, send = sendFb) {
     const calls = res.content.filter((b) => b.type === "tool_use");
     // Đã có đủ SĐT + địa chỉ (lưu đơn) hoặc bot đã nói câu chốt: gửi câu chốt rồi nhường Sapo/nhân viên lên đơn
     const luu = calls.find((c) => c.name === "luu_don");
-    if (luu || (!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
+    // CHOT_TU_VIET: bot lỡ viết câu chốt cố định mà không gọi luu_don → nhắc lại để có câu tổng đơn (chưa gửi gì cho khách)
+    const coDinh = (s) => s.includes(CHOT_TEXT.slice(4, 20));
+    const loiChot = luu?.input?.loi_chot?.trim() || "";
+    if (CHOT_TU_VIET && step < 4 && ((!calls.length && coDinh(text)) || (luu && (!loiChot || coDinh(loiChot))))) {
+      const nhac = "(Hệ thống, khách không thấy tin này) Shop này không dùng câu chốt cố định. Đủ SĐT và địa chỉ thì gọi luu_don với loi_chot là câu tổng đơn theo kịch bản; còn thiếu thì chỉ hỏi đúng phần thiếu.";
+      messages.push({ role: "user", content: calls.length
+        ? [...calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Chưa lưu: loi_chot phải là câu tổng đơn theo kịch bản.", is_error: true })), { type: "text", text: nhac }]
+        : nhac });
+      continue;
+    }
+    if (luu ||(!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
-      await send(id, CHOT_TEXT);
+      const chotText = (CHOT_TU_VIET && luu?.input?.loi_chot?.trim()) || CHOT_TEXT;
+      await send(id, chotText);
       // Ghi kết quả công cụ + câu chốt vào lịch sử: tránh lỗi 400 ở tin sau và để bot biết đơn đã lưu, không lưu lại
       if (calls.length) {
         messages.push({ role: "user", content: calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: c === luu ? "Đã lưu đơn. Không gọi luu_don nữa trừ khi khách đổi thông tin." : "Bỏ qua." })) });
-        messages.push({ role: "assistant", content: CHOT_TEXT });
+        messages.push({ role: "assistant", content: chotText });
       }
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
@@ -365,14 +424,19 @@ async function reply(id, customerText, send = sendFb) {
 }
 
 // ---------- Facebook Messenger ----------
-async function graph(body) {
+async function graph(body, guiLai = false) {
   const base = process.env.GRAPH_URL || "https://graph.facebook.com"; // GRAPH_URL chỉ dùng khi chạy thử
   const r = await fetch(`${base}/${GRAPH_VERSION}/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) console.error("Lỗi gửi tin Facebook:", r.status, await r.text());
+  if (!r.ok) {
+    const loi = await r.text();
+    // 2018300: ứng dụng khác (tin tự động) đang giữ cuộc chat → giành lại rồi gửi lại một lần (trả lại sau lượt trả lời)
+    if (!guiLai && loi.includes("2018300") && body.recipient?.id && (await layQuyen(body.recipient.id))) return graph(body, true);
+    console.error("Lỗi gửi tin Facebook:", r.status, loi);
+  }
   else if (body.message) console.log("[đã gửi] tin cho khách", body.recipient.id);
 }
 async function sendFb(id, text) {
@@ -412,6 +476,7 @@ function enqueue(id, text, layQuyenSau = false) {
 }
 async function handle(id, text) {
   if (user(id).pausedUntil > Date.now()) return; // người thật đang phụ trách khách này
+  if (!sheet.bat) return; // chủ shop tắt bot trong Google Sheet
   // Chốt đơn quá 30 phút: nhường Sapo/nhân viên (trong ngày). Sang hôm sau bot trả lời lại như khách mới.
   const sauChot = Date.now() - (user(id).chotLuc || 0);
   if (sauChot > 30 * 60000 && sauChot < IDLE_RESET_MS) { user(id).chotLuc = 0; return pause(id, "đã chốt đơn quá 30 phút, nhường Sapo"); }
@@ -447,9 +512,19 @@ async function handle(id, text) {
 const app = express();
 // Ảnh sản phẩm công khai; cho phép trang khác tải về (CORS) để dùng làm biểu tượng ứng dụng
 app.use("/anh", (_req, res, next) => { res.set("Access-Control-Allow-Origin", "*"); next(); }, express.static(fileURLToPath(new URL("./anh", import.meta.url))));
-// Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu
-app.get("/chinh-sach-rieng-tu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/chinh-sach.html", import.meta.url))));
-app.get("/xoa-du-lieu", (_req, res) => res.sendFile(fileURLToPath(new URL("./trang/xoa-du-lieu.html", import.meta.url))));
+// Trang chính sách cho Meta xét duyệt: /chinh-sach-rieng-tu và /xoa-du-lieu.
+// Shop thuê: đặt SHOP_NAME (tùy chọn SHOP_LIEN_HE) trên Railway; không đặt thì giữ nội dung BBF.
+function trangShop(html, ten = process.env.SHOP_NAME, lh = process.env.SHOP_LIEN_HE) {
+  if (!ten) return html;
+  return html
+    .replace(/Sâu Sấy Canxi BBF . Lô [^<]*/, `${ten} – ${lh || "nhắn tin cho fanpage trên Messenger"}.`)
+    .replace(/Sâu Sấy Canxi BBF . Lot [^<]*/, `${ten} – ${lh || "message the Page on Messenger"}.`)
+    .replace(/\r?\n<li>[^\n]*(0327729823|327 729 823)[^\n]*<\/li>/g, "") // bỏ cách "gọi Zalo BBF" ở trang xóa dữ liệu
+    .replace("làm một trong hai cách:", "làm như sau:").replace("), either:", "):").replace(" Facebook Page, or</li>", " Facebook Page.</li>")
+    .replaceAll("Sâu Sấy Canxi BBF", ten);
+}
+for (const [duong, file] of [["/chinh-sach-rieng-tu", "chinh-sach.html"], ["/xoa-du-lieu", "xoa-du-lieu.html"]])
+  app.get(duong, (_req, res) => res.type("html").send(trangShop(fs.readFileSync(new URL("./trang/" + file, import.meta.url), "utf8"))));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 app.get("/webhook", (req, res) => {
@@ -504,9 +579,11 @@ app.post("/webhook", (req, res) => {
 
 // Tin trang gửi ra có phải người thật gõ không. Máy tự trả lời (lời chào quảng cáo, trả lời tự động)
 // gửi ngay trong vài giây sau tin khách, hoặc gửi trước khi khách nhắn gì (mở đầu cuộc chat từ quảng cáo).
+// Ứng dụng chỉ gửi tin tự động (không phải nhân viên): 556376998159104 gửi 3 tin chào ngay sau tin khách, có lúc chậm hơn 3 giây
+const APP_TU_DONG = (process.env.APP_TU_DONG ?? "556376998159104").split(",").map((x) => x.trim()).filter(Boolean);
 function nguoiThat(id, app) {
   const t = Date.now() - (user(id).khachNhanLuc || 0);
-  const ok = t > 3000 && t < IDLE_RESET_MS; // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
+  const ok = t > 3000 && t < IDLE_RESET_MS && !APP_TU_DONG.includes(String(app)); // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
   if (!ok) console.log("[bỏ qua] tin tự động của trang gửi khách", id, app ? "từ ứng dụng " + app : "");
   return ok;
 }
@@ -523,7 +600,7 @@ function noiDung(msg) {
 
 // Giành hội thoại để trả lời, trả lời xong thì trả lại cho ứng dụng cũ (Sapo) để nhân viên vẫn nhắn được
 const fbApi = (path, method, body) =>
-  fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
+  fetch(`${process.env.GRAPH_URL || "https://graph.facebook.com"}/${GRAPH_VERSION}/${path}${path.includes("?") ? "&" : "?"}access_token=${PAGE_ACCESS_TOKEN}`, {
     method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body),
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 const borrowed = new Map(); // khách -> ứng dụng đang giữ hội thoại trước khi bot giành
@@ -618,28 +695,32 @@ async function docHopThu(n, truoc) {
   if (!d.profile_id) throw new Error("Không xác định được trang từ PAGE_ACCESS_TOKEN");
   const page = { id: d.profile_id, name: "" };
   const ds = [];
-  let url = `me/conversations?platform=messenger&limit=10&fields=participants,messages.limit(30){message,from,created_time}`;
+  let url = `me/conversations?platform=messenger&limit=10&fields=participants,messages.limit(30){message,from,created_time,attachments{image_data{url}}}`;
+  const anhCua = (m) => (m.attachments?.data ?? []).map((a) => a.image_data?.url).filter(Boolean);
+  const anh = []; // ảnh shop đã gửi khách (để chọn ảnh sản phẩm cho gui_anh)
   // shortcut: đọc tối đa 300 cuộc chat gần nhất rồi chọn n cuộc; page cần học xa hơn thì tăng giới hạn này
   for (let trang = 0; url && ds.length < 300 && trang < 30; trang++) {
     const r = await fbApi(url, "GET");
     if (r.error) throw new Error("Không đọc được hộp thư: " + r.error.message);
     for (const c of r.data ?? []) {
       page.name ||= c.participants?.data?.find((p) => p.id === page.id)?.name || "";
-      const tin = (c.messages?.data ?? []).filter((m) => m.message && (!truoc || m.created_time < truoc)).reverse();
+      const tin = (c.messages?.data ?? []).filter((m) => (m.message || anhCua(m).length) && (!truoc || m.created_time < truoc)).reverse();
       if (tin.length >= 2) ds.push(tin);
+      tin.forEach((m, i) => m.from?.id === page.id && anhCua(m).forEach((url) =>
+        anh.push({ url, khach_hoi: tin.slice(0, i).findLast((x) => x.from?.id !== page.id && x.message)?.message?.slice(0, 120).replace(SDT, "[SĐT]") || "" })));
     }
     url = r.paging?.next ? r.paging.next.replace(/^https:\/\/graph\.facebook\.com\/[^/]+\//, "").replace(/&?access_token=[^&]*/, "") : null;
   }
-  const chot = (t) => t.some((m) => m.from?.id !== page.id && THONG_TIN.test(m.message));
+  const chot = (t) => t.some((m) => m.from?.id !== page.id && THONG_TIN.test(m.message || ""));
   const chon = [...ds.filter(chot), ...ds.filter((t) => !chot(t))].slice(0, n);
   const vanBan = chon.map((t, i) => `--- Cuộc chat ${i + 1}${chot(t) ? " (khách đã để SĐT/địa chỉ)" : ""} ---\n` +
-    t.map((m) => `${m.from?.id === page.id ? "Shop" : "Khách"}: ${m.message.slice(0, 300).replace(SDT, "[SĐT]")}`).join("\n")).join("\n\n");
-  return { ten: page.name, so: chon.length, soChot: chon.filter(chot).length, vanBan };
+    t.map((m) => `${m.from?.id === page.id ? "Shop" : "Khách"}: ${(m.message || "").slice(0, 300).replace(SDT, "[SĐT]")}${anhCua(m).length ? ` [gửi ${anhCua(m).length} ảnh]` : ""}`).join("\n")).join("\n\n");
+  return { ten: page.name, so: chon.length, soChot: chon.filter(chot).length, vanBan, anh: anh.slice(0, 60) };
 }
 async function soanKichBan(n, truoc) {
-  const { ten, so, soChot, vanBan } = await docHopThu(n, truoc);
+  const { ten, so, soChot, vanBan, anh } = await docHopThu(n, truoc);
   if (!so) throw new Error("Không có cuộc chat nào để học");
-  hoc = { trang_thai: `đang soạn từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)...`, luc: new Date().toISOString() };
+  hoc = { trang_thai: `đang soạn từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)...`, luc: new Date().toISOString(), anh };
   const mau = fs.readFileSync(new URL("./shop-mau.txt", import.meta.url), "utf8");
   const res = await client.beta.messages.stream({
     model: process.env.HOC_MODEL || "claude-opus-5-5",
@@ -653,6 +734,7 @@ async function soanKichBan(n, truoc) {
 - Chỗ nào các cuộc chat không cho biết hoặc mâu thuẫn: ghi [CẦN HỎI CHỦ SHOP: ...]. Không bịa.
 - Tin "Shop:" có thể là tin tự động (báo đơn, quảng cáo, ưu đãi): bỏ qua khi học giọng nhân viên.
 - Không chép tên, số điện thoại, địa chỉ của khách nào vào kịch bản.
+- "[gửi N ảnh]" ở tin Shop là nhân viên gửi ảnh: ghi vào kịch bản khách hỏi gì thì nhân viên gửi ảnh (ví dụ hỏi mẫu, màu, size, ảnh thật) để bot cũng gửi ảnh lúc đó.
 - Chỉ trả về nội dung kịch bản, không giải thích thêm.
 
 MẪU:
@@ -663,10 +745,12 @@ ${mau}`,
   const ketQua = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
   if (VOL) fs.writeFileSync(`${VOL}/kich-ban-nhap.txt`, ketQua);
   console.log("[học hộp thư] xong:", so, "cuộc chat,", res.usage?.input_tokens, "token vào,", res.usage?.output_tokens, "token ra");
-  hoc = { trang_thai: `xong, học từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)`, luc: new Date().toISOString(), ket_qua: ketQua };
+  hoc = { trang_thai: `xong, học từ ${so} cuộc chat (${soChot} cuộc đã chốt đơn)`, luc: new Date().toISOString(), ket_qua: ketQua, anh };
 }
 app.get("/hoc", (req, res) => {
   if (!okKey(req.query.key)) return res.sendStatus(403);
+  // &anh=1: danh sách ảnh shop đã gửi khách (link Facebook có hạn) để chọn ảnh sản phẩm cho gui_anh
+  if (req.query.anh) return res.json(hoc.anh ?? []);
   if (req.query.chay && !hoc.trang_thai.startsWith("đang")) {
     const n = Math.min(Number(req.query.n) || 40, 80);
     const truoc = /^\d{4}-\d{2}-\d{2}$/.test(req.query.truoc || "") ? req.query.truoc : "";
