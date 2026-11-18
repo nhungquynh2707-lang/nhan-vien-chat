@@ -159,7 +159,7 @@ const TOOLS = [
     name: "gui_anh",
     description: "Gửi ảnh thật của sản phẩm cho khách. " + (ANH_SHOP
       ? Object.entries(ANH_SHOP).map(([k, v]) => `${k}: ${v.mo_ta}`).join(". ")
-      : "san_pham: sâu cận cảnh. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
+      : "san_pham: 2 ảnh sâu khô bốc trên tay. can_canh: sâu khô bẻ đôi giòn + sâu cận cảnh. dong_goi: túi zip đóng gói."),
     strict: true,
     input_schema: {
       type: "object",
@@ -256,7 +256,7 @@ async function lichSuChat(id) {
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
 const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) => [k, v.anh])) : {
-  san_pham: ["can-canh-2.jpg"],
+  san_pham: ["tren-tay-1.jpg", "tren-tay-2.jpg"],
   can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
   dong_goi: ["tui-zip.jpg"],
 };
