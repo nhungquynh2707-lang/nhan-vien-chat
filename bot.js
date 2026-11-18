@@ -232,7 +232,7 @@ async function lichSuChat(id) {
 }
 const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`;
 const ANH = {
-  san_pham: ["nhan-1kg.jpg", "can-canh-2.jpg"],
+  san_pham: ["can-canh-2.jpg"],
   can_canh: ["be-doi.jpg", "can-canh-1.jpg"],
   dong_goi: ["tui-zip.jpg"],
 };
