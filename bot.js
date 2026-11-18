@@ -579,9 +579,11 @@ app.post("/webhook", (req, res) => {
 
 // Tin trang gửi ra có phải người thật gõ không. Máy tự trả lời (lời chào quảng cáo, trả lời tự động)
 // gửi ngay trong vài giây sau tin khách, hoặc gửi trước khi khách nhắn gì (mở đầu cuộc chat từ quảng cáo).
+// Ứng dụng chỉ gửi tin tự động (không phải nhân viên): 556376998159104 gửi 3 tin chào ngay sau tin khách, có lúc chậm hơn 3 giây
+const APP_TU_DONG = (process.env.APP_TU_DONG ?? "556376998159104").split(",").map((x) => x.trim()).filter(Boolean);
 function nguoiThat(id, app) {
   const t = Date.now() - (user(id).khachNhanLuc || 0);
-  const ok = t > 3000 && t < IDLE_RESET_MS; // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
+  const ok = t > 3000 && t < IDLE_RESET_MS && !APP_TU_DONG.includes(String(app)); // lời chào quảng cáo đến cùng lúc; AI khác (Sapo, Meta) mất ~4s trở lên
   if (!ok) console.log("[bỏ qua] tin tự động của trang gửi khách", id, app ? "từ ứng dụng " + app : "");
   return ok;
 }
