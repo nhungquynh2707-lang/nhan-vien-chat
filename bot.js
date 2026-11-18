@@ -44,7 +44,8 @@ const HANDOFF_MS = Number(process.env.HANDOFF_HOURS || PAUSE_HOURS) * 3600 * 100
 // mỗi lượt tin của khách chưa có đơn bot chờ NHUONG_GIAY (mặc định 60 giây), nhân viên chưa trả lời thì bot trả lời
 const NHUONG_NV = !!process.env.NHUONG_NHAN_VIEN;
 const NHUONG_MS = (Number(process.env.NHUONG_GIAY) || 60) * 1000;
-const CO_DON = /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi|tổng đơn/i;
+// "tổng đơn" chỉ tính khi kèm số tiền (câu chốt thật), không tính câu nhắn dở như "em báo tổng đơn nhé"
+const CO_DON = /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi|tổng đơn[^?!\n]{0,30}?\d\s*(k|đ|000)/i;
 
 // ---------- Lưu trạng thái từng khách (lịch sử chat, tạm dừng AI) ----------
 let state = { users: {} };
