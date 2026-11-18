@@ -325,14 +325,19 @@ async function capNhatSheet() {
 }
 if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000); }
 
-async function reply(id, customerText, send = sendFb) {
+async function reply(id, customerText, sendMot = sendFb) {
+  // Kịch bản có thể tách một lượt thành nhiều tin bằng [TÁCH TIN] (ví dụ: lời chào rồi câu trả lời riêng)
+  const send = async (id, t) => {
+    if (typeof t !== "string" || !t.includes("[TÁCH TIN]")) return sendMot(id, t);
+    for (const phan of t.split("[TÁCH TIN]").map((x) => x.trim()).filter(Boolean)) await sendMot(id, phan);
+  };
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
   u.lastActive = Date.now();
   const messages = u.history;
   // Chụp thông tin khách quen lúc mở cuộc chat: system không được đổi giữa chừng (Claude báo lỗi chữ ký thinking)
   if (!messages.length) {
-    const ls = send === sendFb ? await lichSuChat(id) : null;
+    const ls = sendMot === sendFb ? await lichSuChat(id) : null;
     const capNhat = sheet.text && "CẬP NHẬT CỦA CHỦ SHOP (ưu tiên cao nhất, khác kịch bản ở trên thì làm theo phần này). Tự trả lời khách theo các cập nhật này, KHÔNG gọi chuyen_nhan_vien chỉ vì một cập nhật (ví dụ hết hàng thì báo khách, gợi ý loại khác hoặc nhận đặt trước)." +
       " Mục \"Tin chào đầu tiên\" (nếu có) là TIN ĐẦU TIÊN: gửi NGUYÊN VĂN (giữ xuống dòng) thay cho đoạn chào trong kịch bản; riêng khi khách đã gửi đủ SĐT và địa chỉ thì KHÔNG gửi tin chào, chốt đơn luôn theo kịch bản." +
       " Mục \"Câu chốt đơn\" (nếu có) là mẫu loi_chot khi chốt đơn: giữ nguyên câu chữ, chỉ thay số lượng, loại/size, tổng tiền cho đúng đơn." +
