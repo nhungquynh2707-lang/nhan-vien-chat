@@ -16,7 +16,8 @@ export async function chayBot({ port, fbPort, env = {}, fb = () => ({}) }) {
     q.on("data", (d) => (b += d));
     q.on("end", () => {
       goi.push(q.method + " " + q.url.split("?")[0]);
-      const { status = 200, body = {} } = fb(q, b) || {};
+      const { status = 200, body = {}, sse } = fb(q, b) || {};
+      if (sse) { r.writeHead(200, { "content-type": "text/event-stream" }); return r.end(sse); } // giả Claude trả lời dạng stream
       r.writeHead(status, { "content-type": "application/json" });
       r.end(JSON.stringify(body));
     });

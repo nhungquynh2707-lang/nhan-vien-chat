@@ -123,7 +123,7 @@ Tính tiền: khi khách đặt nhiều gói, gọi công cụ tinh_tong_don đ�
 Chuyển cho nhân viên thật: gọi công cụ chuyen_nhan_vien khi khách muốn gặp người thật / nhân viên / chủ shop, khi khách muốn hoàn tiền hoặc đổi trả, hoặc khi khách hỏi đi hỏi lại một điều bạn không có thông tin. CHỈ những trường hợp đó. Chuyển nhân viên là mất khách, nên hạn chế tối đa.
 Câu hỏi không có trong hướng dẫn: KHÔNG chuyển nhân viên ngay. Nói thật ngắn gọn ("Dạ cái này bên em chưa có ạ" hoặc "Dạ phần này em ghi lại để shop báo anh sau ạ"), nói điều liên quan mà bên em có, rồi quay lại dẫn khách chốt đơn. Không bịa. Với khiếu nại (hàng vỡ, ẩm, mùi lạ, thiếu, sai, giao chậm): xin lỗi và mời khách gửi hình ảnh theo mẫu trước, sau đó mới gọi chuyen_nhan_vien.
 
-Bạn chỉ trả lời khi khách nhắn, không tự nhắc tin sau 30 phút.
+Bạn chỉ trả lời khi khách nhắn, không tự nhắc tin (trừ khi hệ thống yêu cầu viết tin nhắc).
 
 Chỉ dùng thông tin cửa hàng dưới đây, không bịa.
 
@@ -329,6 +329,7 @@ if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000
 async function reply(id, customerText, sendMot = sendFb) {
   // Kịch bản có thể tách một lượt thành nhiều tin bằng [TÁCH TIN] (ví dụ: lời chào rồi câu trả lời riêng)
   const send = async (id, t) => {
+    if (sendMot === sendFb) user(id).botLuc = Date.now();
     if (typeof t !== "string" || !t.includes("[TÁCH TIN]")) return sendMot(id, t);
     for (const phan of t.split("[TÁCH TIN]").map((x) => x.trim()).filter(Boolean)) await sendMot(id, phan);
   };
@@ -632,6 +633,55 @@ async function giveBack(id) {
   console.log("[standby] trả lại hội thoại cho", app, JSON.stringify(r));
 }
 
+// ---------- Nhắc lại khách im lặng: bật bằng NHAC_LAI_PHUT (ví dụ 90) ----------
+// Khách chưa có đơn, bot đã trả lời mà khách im NHAC_LAI_PHUT phút: bot nhắn MỘT tin nhắc (mỗi khách tối đa 1 lần/24 giờ),
+// chỉ trong 23 giờ kể từ tin cuối của khách (luật 24 giờ của Facebook) và chỉ từ 7h đến 22h giờ Việt Nam.
+const NHAC_MS = Number(process.env.NHAC_LAI_PHUT || 0) * 60000;
+const NHAC_NOTE = "(Hệ thống, khách không thấy tin này) Khách đã im lặng một lúc sau tin cuối của shop và chưa để lại SĐT, địa chỉ. " +
+  "Viết MỘT tin nhắc ngắn (tối đa 2 câu, đúng xưng hô và giọng của shop) để khách chốt đơn: nối tiếp điều khách đang hỏi, nhắc giá/ưu đãi chính rồi xin SĐT và địa chỉ. " +
+  "Kịch bản có mục NHẮC LẠI thì làm theo mục đó. Không trách khách, không hỏi vì sao chưa trả lời, không nói đây là tin nhắc. " +
+  "Nếu khách đã từ chối, nói để sau/khi nào cần sẽ nhắn, đã mua chỗ khác, đang khiếu nại, hoặc cuộc chat không phải hỏi mua hàng thì trả lời đúng chữ [KHÔNG NHẮC].";
+async function nhacLai(id) {
+  const u = user(id);
+  const msgs = u.history;
+  if (!msgs.length || msgs.at(-1).role !== "assistant" || (u.khachNhanLuc || 0) > (u.botLuc || 0)) return;
+  u.nhacLuc = Date.now(); // đánh dấu trước: lỗi cũng không nhắc lần nữa
+  saveState();
+  const res = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    output_config: { effort: "medium" },
+    cache_control: { type: "ephemeral" },
+    system: u.ctx ? [{ type: "text", text: SYSTEM }, { type: "text", text: u.ctx }] : SYSTEM,
+    tools: TOOLS,
+    tool_choice: { type: "none" },
+    messages: [...msgs, { role: "user", content: NHAC_NOTE }],
+  });
+  const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  if (!text || text.includes("[KHÔNG NHẮC]")) return console.log("[không nhắc] khách", id);
+  if ((u.khachNhanLuc || 0) > (u.botLuc || 0) || u.pausedUntil > Date.now()) return; // khách/nhân viên vừa nhắn trong lúc soạn
+  msgs.push({ role: "user", content: NHAC_NOTE }, { role: "assistant", content: text });
+  await sendFb(id, text);
+  u.botLuc = Date.now();
+  saveState();
+  await giveBack(id);
+  console.log("[nhắc lại] khách", id);
+}
+function quetNhacLai() {
+  const now = Date.now();
+  const gio = Number(new Date(now).toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh", hour: "numeric", hourCycle: "h23" }));
+  if (gio < 7 || gio >= 22) return;
+  for (const [id, u] of Object.entries(state.users)) {
+    const b = u.botLuc || 0, k = u.khachNhanLuc || 0;
+    if (!b || now - b < NHAC_MS || k > b || now - k > 23 * 3600000) continue; // khách chưa im đủ lâu, hoặc quá 24 giờ
+    if (u.khach || u.coDon || u.chotLuc || u.pausedUntil > now || (u.nvLuc || 0) > b || now - (u.nhacLuc || 0) < 24 * 3600000 || buffers.has(id)) continue;
+    // Xếp vào hàng của khách: không chạy song song với lượt trả lời
+    const tail = (queues.get(id) ?? Promise.resolve()).then(() => nhacLai(id)).catch((e) => console.error("[nhắc lại] lỗi khách", id, e.message));
+    queues.set(id, tail);
+  }
+}
+if (NHAC_MS) setInterval(quetNhacLai, Math.min(5 * 60000, NHAC_MS));
+
 // ---------- Trả lời bình luận (bật bằng BINH_LUAN=1, page cần đăng ký trường "feed" và quyền pages_manage_engagement) ----------
 const TOOL_BL = {
   name: "tra_loi_binh_luan",
@@ -781,6 +831,65 @@ q.onclick=()=>{quay=true;log.textContent="";add("(Cùng khách, lịch sử chat
 f.onsubmit=async e=>{e.preventDefault();const text=t.value.trim();if(!text)return;t.value="";add(text,"k");
 const res=await fetch("/thu",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key,id,text,quay})});quay=false;
 const j=await res.json();(j.replies||[]).forEach(x=>add(x,"a"));if(j.note)add(j.note,"n")}</script>`;
+// ---------- Vì sao khách không chốt: /phan-tich?key=<VERIFY_TOKEN>&chay=1[&ngay=2] rồi mở /phan-tich?key=... xem kết quả ----------
+let phanTich = { trang_thai: "chưa chạy" };
+async function chayPhanTich(ngay) {
+  const d = (await fbApi(`debug_token?input_token=${PAGE_ACCESS_TOKEN}`, "GET")).data ?? {};
+  if (!d.profile_id) throw new Error("Không xác định được trang từ PAGE_ACCESS_TOKEN");
+  const tu = Date.now() - ngay * 86400000;
+  const ds = [];
+  let url = "me/conversations?platform=messenger&limit=25&fields=updated_time,messages.limit(30){message,from,created_time}";
+  // shortcut: đọc tối đa 1000 cuộc chat gần nhất; page đông hơn thì giảm số ngày
+  for (let trang = 0, het = false; url && !het && trang < 40; trang++) {
+    const r = await fbApi(url, "GET");
+    if (r.error) throw new Error("Không đọc được hộp thư: " + r.error.message);
+    for (const c of r.data ?? []) {
+      if (Date.parse(c.updated_time) < tu) { het = true; break; }
+      const tin = (c.messages?.data ?? []).filter((m) => m.message && Date.parse(m.created_time) >= tu).reverse();
+      if (tin.some((m) => m.from?.id !== d.profile_id)) ds.push(tin);
+    }
+    url = r.paging?.next ? r.paging.next.replace(/^https:\/\/graph\.facebook\.com\/[^/]+\//, "").replace(/&?access_token=[^&]*/, "") : null;
+  }
+  const coDon = (t) => t.some((m) => (m.from?.id === d.profile_id ? CO_DON : THONG_TIN).test(m.message));
+  const khong = ds.filter((t) => !coDon(t));
+  const tom = `Trong ${ngay} ngày: ${ds.length} cuộc chat có khách nhắn, ${ds.length - khong.length} cuộc có đơn hoặc khách để SĐT/địa chỉ (${ds.length ? Math.round((100 * (ds.length - khong.length)) / ds.length) : 0}%), ${khong.length} cuộc không thành đơn.`;
+  phanTich = { trang_thai: "đang phân tích... " + tom, luc: new Date().toISOString() };
+  if (!khong.length) return (phanTich = { trang_thai: "xong. " + tom, luc: new Date().toISOString(), ket_qua: "" });
+  const mau = khong.slice(0, 80); // shortcut: chỉ gửi Claude 80 cuộc gần nhất cho đỡ tốn
+  const vanBan = mau.map((t, i) => `--- Cuộc chat ${i + 1} ---\n` + t.slice(-20).map((m) =>
+    `${m.from?.id === d.profile_id ? "Shop" : "Khách"}: ${m.message.slice(0, 250).replace(SDT, "[SĐT]")}`).join("\n")).join("\n\n");
+  const res = await client.beta.messages.stream({
+    model: process.env.HOC_MODEL || "claude-opus-5-5",
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: `Bạn giúp chủ shop bán hàng qua Messenger tăng tỉ lệ chốt đơn. Dưới đây là kịch bản bot đang dùng, sau đó là các cuộc chat KHÔNG thành đơn (khách không để SĐT/địa chỉ). Tin "Shop:" có thể do bot, nhân viên hoặc tin tự động gửi.
+Viết báo cáo tiếng Việt, ngắn, dễ hiểu cho người không rành kỹ thuật, theo đúng 3 mục:
+1. KHÁCH BỎ Ở ĐÂU: nhóm các cuộc chat theo lý do/thời điểm khách im (ví dụ hỏi giá xong im, chê đắt, sợ lừa, sợ đau, hỏi điều bot trả lời sai, bot trả lời chậm/không trả lời, khách chỉ bấm quảng cáo), mỗi nhóm ghi số cuộc chat và 1-2 câu ví dụ ngắn.
+2. LỖI CỦA SHOP/BOT: câu trả lời nào làm mất khách (sai, dài, lạc đề, không xin SĐT, hỏi lại, chèo kéo...), kèm ví dụ.
+3. NÊN SỬA KỊCH BẢN THẾ NÀO: 3-6 thay đổi cụ thể, mỗi thay đổi viết sẵn câu mẫu để chép vào kịch bản, xếp theo mức tác động.
+Không chép tên, SĐT, địa chỉ của khách. Không bịa số liệu.
+
+KỊCH BẢN ĐANG DÙNG:
+${SHOP_INFO}`,
+    messages: [{ role: "user", content: `${tom}\nDưới đây là ${mau.length} cuộc chat không thành đơn gần nhất:\n\n${vanBan}` }],
+  }).finalMessage();
+  if (res.stop_reason === "refusal") throw new Error("Claude từ chối phân tích");
+  const ketQua = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  if (VOL) fs.writeFileSync(`${VOL}/phan-tich.txt`, tom + "\n\n" + ketQua);
+  console.log("[phân tích] xong:", ds.length, "cuộc chat,", khong.length, "không thành đơn,", res.usage?.input_tokens, "token vào,", res.usage?.output_tokens, "token ra");
+  phanTich = { trang_thai: "xong. " + tom, luc: new Date().toISOString(), ket_qua: ketQua };
+}
+app.get("/phan-tich", (req, res) => {
+  if (!okKey(req.query.key)) return res.sendStatus(403);
+  if (req.query.chay && !phanTich.trang_thai.startsWith("đang")) {
+    const ngay = Math.min(Math.max(Number(req.query.ngay) || 2, 1), 7);
+    phanTich = { trang_thai: "đang đọc hộp thư...", luc: new Date().toISOString() };
+    chayPhanTich(ngay).catch((e) => { console.error("[phân tích] lỗi:", e.message); phanTich = { trang_thai: "lỗi: " + e.message, luc: new Date().toISOString() }; });
+  }
+  res.type("text/plain; charset=utf-8").send(`Trạng thái: ${phanTich.trang_thai} (${phanTich.luc || ""})\n\n${phanTich.ket_qua || "(Mở lại trang này sau 2-3 phút để xem kết quả)"}`);
+});
+
 const okKey = (k) => typeof k === "string" && k === VERIFY_TOKEN;
 app.get("/thu", (req, res) => (okKey(req.query.key) ? res.send(TEST_PAGE) : res.sendStatus(403)));
 app.post("/thu", async (req, res) => {
