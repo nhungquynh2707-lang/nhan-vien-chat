@@ -1,0 +1,26 @@
+{
+  "san_pham": {
+    "mo_ta": "ảnh tổng quan mặt nạ nâng cơ chữ V (chất liệu thoáng khí, dễ điều chỉnh). Gửi khi khách hỏi giá lần đầu, xin xem hình, ảnh thật, mẫu, màu",
+    "anh": ["thuylinh/san-pham.jpg"]
+  },
+  "cach_deo": {
+    "mo_ta": "ảnh 3 bước cách đeo. Gửi khi khách hỏi cách đeo, đeo thế nào, sợ khó đeo",
+    "anh": ["thuylinh/cach-deo.jpg"]
+  },
+  "vung_ho_tro": {
+    "mo_ta": "ảnh các vùng hỗ trợ: viền hàm, má, rãnh cười, cằm đôi, má dưới, da săn chắc. Gửi khi khách hỏi tác dụng, có hiệu quả không, có giảm nọng cằm/mỡ mặt không",
+    "anh": ["thuylinh/vung-ho-tro.jpg"]
+  },
+  "deo_ngu": {
+    "mo_ta": "ảnh đeo khi ngủ, dùng cả ngày lẫn đêm. Gửi khi khách hỏi đeo ngủ được không, đeo lâu có khó chịu không",
+    "anh": ["thuylinh/deo-ngu.jpg"]
+  },
+  "om_khit": {
+    "mo_ta": "2 ảnh ôm khít 360 độ, dây silicone chống trượt. Gửi khi khách sợ tuột, lệch, hở, hỏi có ôm sát không",
+    "anh": ["thuylinh/chong-truot.jpg", "thuylinh/om-360.jpg"]
+  },
+  "hang_ngay": {
+    "mo_ta": "ảnh đeo khi làm việc, yoga, thư giãn. Gửi khi khách hỏi đeo lúc nào, đi làm/ở nhà đeo được không, có vướng không",
+    "anh": ["thuylinh/hang-ngay.jpg"]
+  }
+}
