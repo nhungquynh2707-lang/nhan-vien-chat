@@ -1,0 +1,14 @@
+{
+  "san_pham": {
+    "mo_ta": "3 ảnh thật hộp sụn nâng mũi: hộp hồng + 3 cặp sụn + que gắp, ảnh mở hộp và ảnh bên trong hộp. Gửi khi khách xin ảnh, xin xem hình, ảnh thật, sản phẩm trông thế nào, trong hộp có gì",
+    "anh": ["huyenchau/hop-va-sun.jpg", "huyenchau/ben-trong-hop.jpg", "huyenchau/mo-hop.jpg"]
+  },
+  "dong_goi": {
+    "mo_ta": "3 ảnh vỏ hộp nguyên seal, nhiều hộp, hộp kèm túi đựng sụn. Gửi khi khách hỏi đóng gói, hàng có chính hãng/nguyên seal không, sợ hàng kém chất lượng",
+    "anh": ["huyenchau/hop-nguyen-seal.jpg", "huyenchau/nhieu-hop.jpg", "huyenchau/hop-va-tui.jpg"]
+  },
+  "cach_deo": {
+    "mo_ta": "1 ảnh 3 bước đeo sụn và mũi trước/sau khi đeo. Gửi khi khách hỏi đeo vào trông thế nào, có ảnh trước sau không, mũi lên được bao nhiêu",
+    "anh": ["huyenchau/cach-deo.jpg"]
+  }
+}
