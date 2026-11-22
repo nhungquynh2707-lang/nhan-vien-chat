@@ -351,6 +351,7 @@ async function reply(id, customerText, sendMot = sendFb) {
   }
   messages.push({ role: "user", content: await noiDungClaude(customerText) });
 
+  const cho = []; // video gọi khi chưa có chữ: đợi gửi sau câu trả lời
   for (let step = 0; step < 5; step++) {
     const res = await client.messages.create({
       model: MODEL,
@@ -397,7 +398,10 @@ async function reply(id, customerText, sendMot = sendFb) {
     if (!calls.length) {
       saveState();
       if (text.includes("[KHÔNG TRẢ LỜI]")) return console.log("[im lặng] khách", id, "chỉ cảm ơn/like");
-      return text ? send(id, text) : baoChuyen(send, id);
+      if (!text) return baoChuyen(send, id);
+      await send(id, text);
+      for (const m of cho.splice(0)) await send(id, m);
+      return;
     }
     const handoff = calls.find((c) => c.name === "chuyen_nhan_vien");
     if (handoff) {
@@ -406,7 +410,7 @@ async function reply(id, customerText, sendMot = sendFb) {
       const daMua = !!u.khach || /SPXVN|Xác nhận đơn|giao thành công|chuẩn bị và gửi/i.test(u.ctx || "");
       return pause(id, (handoff.input?.ly_do || "khách cần người thật") + (daMua ? " (khách đã mua)" : ""), daMua ? HANDOFF_MS : PAUSE_MS);
     }
-    if (text) await send(id, text);
+    if (text) { await send(id, text); for (const m of cho.splice(0)) await send(id, m); }
     const pending = [];
     messages.push({
       role: "user",
@@ -427,8 +431,9 @@ async function reply(id, customerText, sendMot = sendFb) {
         }
       }),
     });
-    for (const img of pending) await send(id, img);
+    for (const m of pending) if (text || !m.video) await send(id, m); else cho.push(m);
   }
+  for (const m of cho) await send(id, m);
   await baoChuyen(send, id);
   pause(id, "AI không hoàn thành được câu trả lời");
 }
