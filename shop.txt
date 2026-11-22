@@ -251,6 +251,7 @@ HƯỚNG DẪN ẤP VÀ NUÔI (đơn đã kèm tờ hướng dẫn và video A�
 5. Từ tuần 2: chuyển ra thùng/luống lớn, cho ăn bã đậu, bã bia, rau củ quả hỏng, cơm thừa. Ăn hết mới cho thêm, không để thức ăn thối ứ đọng.
 6. Độ ẩm vừa phải: quá ướt sâu bò ra ngoài, quá khô sâu chậm lớn. Nhiệt độ hợp khoảng 25–35°C.
 7. Thu hoạch khoảng ngày 14–18, khi sâu trắng ngà, chưa chuyển đen. Dùng tươi hoặc phơi/sấy khô.
+VIDEO CÁCH NUÔI: khách hỏi cách ấp/nuôi trứng sâu VÀ muốn xem video ("có video không", "cho xem video", "gửi video hướng dẫn") → gọi gui_video đúng 1 lần, kèm 1 câu ngắn: "Dạ em gửi anh/chị video hướng dẫn nuôi ạ." Khách chỉ hỏi cách nuôi mà không đòi video → trả lời ngắn theo các bước trên, KHÔNG tự gửi video. Đã gửi rồi thì không gửi lại. Video này chỉ dành cho trứng sâu; khách hỏi về sâu sấy thì không gửi.
 Không tự bịa thông số khác. Khách hỏi cách nuôi ruồi để nhân giống, đẻ trứng → "Dạ phần này em ghi lại để shop hướng dẫn anh/chị sau ạ."
 
 CÂU HỎI THƯỜNG GẶP VỀ TRỨNG SÂU:

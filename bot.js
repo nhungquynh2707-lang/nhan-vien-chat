@@ -31,6 +31,11 @@ const SHOP_INFO = fs.readFileSync(new URL("./" + SHOP_FILE, import.meta.url), "u
 // CHOT_TU_VIET=1: khi chốt đơn bot tự viết câu tổng đơn theo kịch bản shop (thay câu chốt cố định)
 const CHOT_TU_VIET = !!process.env.CHOT_TU_VIET;
 const ANH_SHOP = process.env.ANH_FILE ? JSON.parse(fs.readFileSync(new URL("./" + process.env.ANH_FILE, import.meta.url), "utf8")) : null;
+// Video hướng dẫn của từng shop (file trong anh/); shop không có ở đây thì không có công cụ gui_video
+const VIDEO = {
+  "shop-huyenchau.txt": { file: "hc-cach-deo.mp4", mo_ta: "Gửi video hướng dẫn cách đeo sụn nâng mũi (dùng kẹp đưa sụn vào mũi) cho khách." },
+  "shop.txt": { file: "bbf-nuoi-trung-sau.mp4", mo_ta: "Gửi video hướng dẫn nuôi sâu canxi từ hũ trứng (trộn cám ẩm, rải trứng, phun nước, sang chậu) cho khách hỏi cách nuôi và muốn xem video." },
+}[SHOP_FILE];
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const STATE_FILE = VOL ? `${VOL}/state.json` : new URL("./state.json", import.meta.url);
@@ -170,7 +175,7 @@ const TOOLS = [
   },
   {
     name: "gui_video",
-    description: "Gửi video hướng dẫn cách đeo sụn nâng mũi (dùng kẹp đưa sụn vào mũi) cho khách.",
+    description: VIDEO?.mo_ta ?? "",
     input_schema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -200,7 +205,7 @@ const TOOLS = [
       properties: { ly_do: { type: "string", description: "Lý do chuyển, ngắn gọn" } },
     },
   },
-].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" || !!ANH_SHOP : t.name === "gui_video" ? SHOP_FILE === "shop-huyenchau.txt" : true));
+].filter((t) => (t.name === "gui_anh" ? SHOP_FILE === "shop.txt" || !!ANH_SHOP : t.name === "gui_video" ? !!VIDEO : true));
 
 const vnd = (n) => n.toLocaleString("vi-VN") + "đ";
 function tinhTongDon({ items }) {
@@ -412,7 +417,7 @@ async function reply(id, customerText, sendMot = sendFb) {
             return { type: "tool_result", tool_use_id: c.id, content: "Đã gửi ảnh cho khách." };
           }
           if (c.name === "gui_video") {
-            pending.push({ video: `${BASE_URL}/anh/hc-cach-deo.mp4` });
+            pending.push({ video: `${BASE_URL}/anh/${VIDEO.file}` });
             return { type: "tool_result", tool_use_id: c.id, content: "Đã gửi video cho khách. Không gửi lại video này nữa." };
           }
           const out = c.name === "luu_don" ? luuDon(u, c.input) : tinhTongDon(c.input);
