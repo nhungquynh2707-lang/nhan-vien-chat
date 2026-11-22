@@ -34,7 +34,7 @@ const ANH_SHOP = process.env.ANH_FILE ? JSON.parse(fs.readFileSync(new URL("./" 
 // Video hướng dẫn của từng shop (file trong anh/); shop không có ở đây thì không có công cụ gui_video
 const VIDEO = {
   "shop-huyenchau.txt": { file: "hc-cach-deo.mp4", mo_ta: "Gửi video hướng dẫn cách đeo sụn nâng mũi (dùng kẹp đưa sụn vào mũi) cho khách." },
-  "shop.txt": { file: "bbf-nuoi-trung-sau.mp4", mo_ta: "Gửi video hướng dẫn nuôi sâu canxi từ hũ trứng (trộn cám ẩm, rải trứng, phun nước, sang chậu) cho khách hỏi cách nuôi và muốn xem video." },
+  "shop.txt": { file: "bbf-nuoi-trung-sau.mp4", mo_ta: "Gửi video hướng dẫn nuôi sâu canxi từ hũ trứng. Gọi ngay sau khi gửi hướng dẫn nuôi trứng sâu, hoặc khi khách xin video cách nuôi. Mỗi cuộc chat một lần." },
 }[SHOP_FILE];
 // Railway tự đặt RAILWAY_VOLUME_MOUNT_PATH khi gắn Volume: lưu ở đó để không mất khi cập nhật bot
 const VOL = process.env.RAILWAY_VOLUME_MOUNT_PATH;
