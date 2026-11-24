@@ -287,9 +287,34 @@ async function ganNhanPancake(psid) {
       body: JSON.stringify({ action: "add", tag_id: String(nhanId) }),
     }).then((x) => x.json());
     console.log("[pancake] gắn nhãn khách", psid, r.success ? "ok" : JSON.stringify(r).slice(0, 200));
+    if (r.success) pkDem.ok++; else { pkDem.loi++; pkDem.loi_cuoi = JSON.stringify(r).slice(0, 200); }
   } catch (e) {
+    pkDem.loi++; pkDem.loi_cuoi = e.message;
     console.error("[pancake] lỗi gắn nhãn:", e.message);
   }
+}
+const pkDem = { ok: 0, loi: 0, loi_cuoi: null };
+// Trang kiểm (không lộ mã, không lộ khách): mã có chạy không, có nhãn không, mã hội thoại có đúng dạng {trang}_{psid} không
+async function kiemPancake() {
+  const tk = process.env.PANCAKE_TOKEN;
+  const out = { co_ma: !!tk, trang: trangId || null, nhan_id: nhanId ?? null, ...pkDem };
+  if (!tk || !trangId) return out;
+  const q = "page_access_token=" + encodeURIComponent(tk);
+  try {
+    if (nhanId == null) {
+      const r = await fetch(`${PK_API}/${trangId}/tags?${q}`).then((x) => x.json());
+      out.nhan_id = nhanId = r.tags?.find((t) => t.text?.trim().toLowerCase() === (process.env.PANCAKE_TAG || "chưa lưu").trim().toLowerCase())?.id ?? null;
+      if (nhanId == null) out.loi_nhan = JSON.stringify(r).slice(0, 200);
+    }
+    const r = await fetch(`${PK_API.replace("/v1/", "/v2/")}/${trangId}/conversations?fields=id,type,from{id}&${q}`).then((x) => x.json());
+    const ib = (r.conversations || []).filter((c) => c.type === "INBOX");
+    out.hoi_thoai_inbox = ib.length;
+    out.dung_dang_ma = ib.filter((c) => c.id === `${trangId}_${c.from?.id}`).length;
+    if (!r.conversations) out.loi_hoi_thoai = JSON.stringify(r).slice(0, 200);
+  } catch (e) {
+    out.loi_kiem = e.message;
+  }
+  return out;
 }
 
 // ---------- Gọi Claude ----------
@@ -838,4 +863,5 @@ app.post("/thu", async (req, res) => {
 });
 
 app.get("/", (_req, res) => res.send("Nhân viên chat đang chạy"));
+app.get("/pancake", async (_req, res) => res.json(await kiemPancake()));
 app.listen(Number(PORT), () => console.log(`Đang chạy ở cổng ${PORT}, mô hình ${MODEL}`));
