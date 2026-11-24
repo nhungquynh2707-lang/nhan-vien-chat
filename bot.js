@@ -270,6 +270,35 @@ const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) 
 // PANCAKE_TOKEN = mã API của trang (Pancake → Cài đặt → Công cụ → Public API). Không đặt thì bỏ qua.
 const PK_API = process.env.PANCAKE_API_URL || "https://pages.fm/api/public_api/v1/pages"; // PANCAKE_API_URL chỉ dùng khi chạy thử
 let trangId = process.env.PANCAKE_PAGE_ID, nhanId;
+// Phiếu đơn ghi vào ghi chú khách trên Pancake, để nhân viên lên đơn không phải đọc lại cả chat
+async function ghiPhieuPancake(psid, message) {
+  const tk = process.env.PANCAKE_TOKEN;
+  if (!tk || !trangId || !/^\d+$/.test(psid)) return;
+  try {
+    const q = "page_access_token=" + encodeURIComponent(tk);
+    // Hội thoại vừa được bot trả lời nên nằm trong 60 hội thoại mới nhất
+    const ds = await fetch(`${PK_API.replace("/v1/", "/v2/")}/${trangId}/conversations?fields=id,page_customer{id}&${q}`).then((x) => x.json());
+    const kh = ds.conversations?.find((c) => c.id === `${trangId}_${psid}`)?.page_customer?.id;
+    if (!kh) { pkDem.phieu_loi++; return console.error("[pancake] không tìm thấy khách để ghi phiếu", psid); }
+    const r = await fetch(`${PK_API}/${trangId}/page_customers/${kh}/notes?${q}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then((x) => x.json());
+    if (r.success) pkDem.phieu_ok++; else { pkDem.phieu_loi++; pkDem.loi_cuoi = JSON.stringify(r).slice(0, 200); }
+    console.log("[pancake] ghi phiếu khách", psid, r.success ? "ok" : JSON.stringify(r).slice(0, 200));
+  } catch (e) {
+    pkDem.phieu_loi++; pkDem.loi_cuoi = e.message;
+    console.error("[pancake] lỗi ghi phiếu:", e.message);
+  }
+}
+function phieuDon(u, luu) {
+  const gio = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  if (luu?.sdt) return `ĐƠN BOT ${gio}: ${luu.noi_dung} | SĐT ${luu.sdt} | ${luu.dia_chi}`;
+  const k = u.khach;
+  return `ĐƠN BOT ${gio}: khách chốt "như cũ", bot không lưu chi tiết – đọc chat/tra đơn cũ` +
+    (k?.sdt ? ` (bot nhớ: SĐT ${k.sdt} | ${k.dia_chi} | đơn trước: ${k.don.at(-1)?.noi_dung || "?"})` : "");
+}
 async function ganNhanPancake(psid) {
   const tk = process.env.PANCAKE_TOKEN;
   if (!tk || !trangId || !/^\d+$/.test(psid)) return;
@@ -293,7 +322,7 @@ async function ganNhanPancake(psid) {
     console.error("[pancake] lỗi gắn nhãn:", e.message);
   }
 }
-const pkDem = { ok: 0, loi: 0, loi_cuoi: null };
+const pkDem = { ok: 0, loi: 0, phieu_ok: 0, phieu_loi: 0, loi_cuoi: null };
 // Trang kiểm (không lộ mã, không lộ khách): mã có chạy không, có nhãn không, mã hội thoại có đúng dạng {trang}_{psid} không
 async function kiemPancake() {
   const tk = process.env.PANCAKE_TOKEN;
@@ -445,6 +474,7 @@ async function reply(id, customerText, sendMot = sendFb) {
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
       await ganNhanPancake(id);
+      await ghiPhieuPancake(id, phieuDon(u, luu?.input));
       return console.log("[chốt đơn] khách", id);
     }
     if (!calls.length) {
