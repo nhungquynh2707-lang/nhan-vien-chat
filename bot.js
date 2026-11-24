@@ -462,6 +462,18 @@ async function reply(id, customerText, sendMot = sendFb) {
         : nhac });
       continue;
     }
+    // Vừa chốt (trong 30 phút) mà bot lại chốt y đơn cũ, thường do khách hỏi chuyện khác: nhắc trả lời đúng câu hỏi, không gửi câu chốt nữa
+    const donCu = u.khach?.don?.at(-1);
+    const chotLai = (!calls.length && coDinh(text)) ||
+      (luu && luu.input?.sdt === u.khach?.sdt && luu.input?.dia_chi === u.khach?.dia_chi && luu.input?.noi_dung === donCu?.noi_dung);
+    if (step < 4 && chotLai && Date.now() - (u.chotLuc || 0) < 30 * 60000) {
+      const nhac = "(Hệ thống, khách không thấy tin này) Đơn này đã chốt và đã lưu rồi. KHÔNG nói lại câu chốt, KHÔNG gọi luu_don lại. Trả lời đúng câu khách vừa hỏi theo kịch bản (khách hỏi cách nuôi thì gửi hướng dẫn nuôi).";
+      console.log("[không chốt lại] khách", id);
+      messages.push({ role: "user", content: calls.length
+        ? [...calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Không lưu: đơn này đã lưu rồi.", is_error: true })), { type: "text", text: nhac }]
+        : nhac });
+      continue;
+    }
     if (luu ||(!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
       const chotText = (CHOT_TU_VIET && luu?.input?.loi_chot?.trim()) || CHOT_TEXT;
