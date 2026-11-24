@@ -467,7 +467,7 @@ async function reply(id, customerText, sendMot = sendFb) {
     const chotLai = (!calls.length && coDinh(text)) ||
       (luu && luu.input?.sdt === u.khach?.sdt && luu.input?.dia_chi === u.khach?.dia_chi && luu.input?.noi_dung === donCu?.noi_dung);
     if (step < 4 && chotLai && Date.now() - (u.chotLuc || 0) < 30 * 60000) {
-      const nhac = "(Hệ thống, khách không thấy tin này) Đơn này đã chốt và đã lưu rồi. KHÔNG nói lại câu chốt, KHÔNG gọi luu_don lại. Trả lời đúng câu khách vừa hỏi theo kịch bản (khách hỏi cách nuôi thì gửi hướng dẫn nuôi).";
+      const nhac = "(Hệ thống, khách không thấy tin này) Đơn này đã chốt và đã lưu rồi. KHÔNG nói lại câu chốt, KHÔNG gọi luu_don lại. Trả lời đúng câu khách vừa hỏi theo kịch bản (khách hỏi cách nuôi thì gửi hướng dẫn nuôi). Riêng khi khách vừa mua thêm, đổi số lượng hoặc đổi SĐT/địa chỉ: gọi luu_don với noi_dung là CẢ ĐƠN MỚI (đủ các món, tổng tiền) thì mới được chốt lại.";
       console.log("[không chốt lại] khách", id);
       messages.push({ role: "user", content: calls.length
         ? [...calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Không lưu: đơn này đã lưu rồi.", is_error: true })), { type: "text", text: nhac }]
