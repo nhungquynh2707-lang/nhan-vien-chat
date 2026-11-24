@@ -412,9 +412,15 @@ if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000
 
 async function reply(id, customerText, sendMot = sendFb) {
   // Kịch bản có thể tách một lượt thành nhiều tin bằng [TÁCH TIN] (ví dụ: lời chào rồi câu trả lời riêng)
+  let daGanNhan = false; // nhánh chốt đơn tự gắn (kèm luu_don); các nhánh khác lỡ nói câu chốt thì gắn ở đây
   const send = async (id, t) => {
-    if (typeof t !== "string" || !t.includes("[TÁCH TIN]")) return sendMot(id, t);
-    for (const phan of t.split("[TÁCH TIN]").map((x) => x.trim()).filter(Boolean)) await sendMot(id, phan);
+    if (typeof t !== "string" || !t.includes("[TÁCH TIN]")) await sendMot(id, t);
+    else for (const phan of t.split("[TÁCH TIN]").map((x) => x.trim()).filter(Boolean)) await sendMot(id, phan);
+    if (!daGanNhan && typeof t === "string" && t.includes(CHOT_TEXT.slice(4, 20))) {
+      daGanNhan = true;
+      await ganNhanPancake(id);
+      await ghiPhieuPancake(id, phieuDon(u, null));
+    }
   };
   const u = user(id);
   if (Date.now() - u.lastActive > IDLE_RESET_MS) u.history = [];
@@ -477,6 +483,7 @@ async function reply(id, customerText, sendMot = sendFb) {
     if (luu ||(!calls.length && text.includes(CHOT_TEXT.slice(4, 20)))) {
       if (luu) try { luuDon(u, luu.input); } catch (e) { console.error("Lỗi lưu đơn:", e.message); }
       const chotText = (CHOT_TU_VIET && luu?.input?.loi_chot?.trim()) || CHOT_TEXT;
+      daGanNhan = true; // gắn nhãn + phiếu (có luu_don) ở cuối nhánh này
       await send(id, chotText);
       // Ghi kết quả công cụ + câu chốt vào lịch sử: tránh lỗi 400 ở tin sau và để bot biết đơn đã lưu, không lưu lại
       if (calls.length) {
