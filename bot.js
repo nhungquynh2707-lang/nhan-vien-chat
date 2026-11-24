@@ -266,6 +266,32 @@ const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) 
   dong_goi: ["tui-zip.jpg"],
 };
 
+// ---------- Gắn nhãn Pancake khi chốt ----------
+// PANCAKE_TOKEN = mã API của trang (Pancake → Cài đặt → Công cụ → Public API). Không đặt thì bỏ qua.
+const PK_API = process.env.PANCAKE_API_URL || "https://pages.fm/api/public_api/v1/pages"; // PANCAKE_API_URL chỉ dùng khi chạy thử
+let trangId = process.env.PANCAKE_PAGE_ID, nhanId;
+async function ganNhanPancake(psid) {
+  const tk = process.env.PANCAKE_TOKEN;
+  if (!tk || !trangId || !/^\d+$/.test(psid)) return;
+  try {
+    const q = "page_access_token=" + encodeURIComponent(tk);
+    if (nhanId == null) {
+      const ten = (process.env.PANCAKE_TAG || "chưa lưu").trim().toLowerCase();
+      const r = await fetch(`${PK_API}/${trangId}/tags?${q}`).then((x) => x.json());
+      nhanId = r.tags?.find((t) => t.text?.trim().toLowerCase() === ten)?.id;
+      if (nhanId == null) return console.error("[pancake] không thấy nhãn", ten, JSON.stringify(r).slice(0, 200));
+    }
+    const r = await fetch(`${PK_API}/${trangId}/conversations/${trangId}_${psid}/tags?${q}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", tag_id: String(nhanId) }),
+    }).then((x) => x.json());
+    console.log("[pancake] gắn nhãn khách", psid, r.success ? "ok" : JSON.stringify(r).slice(0, 200));
+  } catch (e) {
+    console.error("[pancake] lỗi gắn nhãn:", e.message);
+  }
+}
+
 // ---------- Gọi Claude ----------
 const CHOT_TEXT = "Dạ! Để em chuẩn bị và gửi luôn ạ.";
 const HANDOFF_TEXT = process.env.HANDOFF_TEXT || "Dạ anh/chị đợi em một chút, em chuyển nhân viên hỗ trợ mình ngay ạ.";
@@ -393,6 +419,7 @@ async function reply(id, customerText, sendMot = sendFb) {
       }
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
+      await ganNhanPancake(id);
       return console.log("[chốt đơn] khách", id);
     }
     if (!calls.length) {
@@ -560,6 +587,7 @@ app.post("/webhook", (req, res) => {
   if (req.body.object !== "page") return;
 
   for (const entry of req.body.entry ?? []) {
+    trangId ??= entry.id;
     // Ghi lại loại sự kiện để dò lỗi (không ghi nội dung tin)
     console.log("[webhook] trang", entry.id, "messaging:", (entry.messaging ?? []).length, "standby:", (entry.standby ?? []).length, "changes:", (entry.changes ?? []).length);
     for (const ch of entry.changes ?? []) {
