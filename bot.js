@@ -271,14 +271,24 @@ const ANH = ANH_SHOP ? Object.fromEntries(Object.entries(ANH_SHOP).map(([k, v]) 
 const PK_API = process.env.PANCAKE_API_URL || "https://pages.fm/api/public_api/v1/pages"; // PANCAKE_API_URL chỉ dùng khi chạy thử
 let trangId = process.env.PANCAKE_PAGE_ID, nhanId;
 // Phiếu đơn ghi vào ghi chú khách trên Pancake, để nhân viên lên đơn không phải đọc lại cả chat
+const PHIEU_CHO = [0, 5000, 15000];
 async function ghiPhieuPancake(psid, message) {
   const tk = process.env.PANCAKE_TOKEN;
   if (!tk || !trangId || !/^\d+$/.test(psid)) return;
   try {
     const q = "page_access_token=" + encodeURIComponent(tk);
-    // Hội thoại vừa được bot trả lời nên nằm trong 60 hội thoại mới nhất
-    const ds = await fetch(`${PK_API.replace("/v1/", "/v2/")}/${trangId}/conversations?fields=id,page_customer{id}&${q}`).then((x) => x.json());
-    const kh = ds.conversations?.find((c) => c.id === `${trangId}_${psid}`)?.page_customer?.id;
+    // Hội thoại vừa được bot trả lời nên nằm trong 60 hội thoại mới nhất, nhưng Pancake có thể
+    // chưa kịp cập nhật (8/43 lần lỗi ngày 24/11) → thử lại, thêm cả lọc theo nhãn vừa gắn
+    let kh;
+    for (const cho of PHIEU_CHO) {
+      if (cho) await new Promise((r) => setTimeout(r, cho));
+      for (const loc of nhanId ? ["", `&tags=${nhanId}`] : [""]) {
+        const ds = await fetch(`${PK_API.replace("/v1/", "/v2/")}/${trangId}/conversations?fields=id,page_customer{id}${loc}&${q}`).then((x) => x.json());
+        kh = ds.conversations?.find((c) => c.id === `${trangId}_${psid}`)?.page_customer?.id;
+        if (kh) break;
+      }
+      if (kh) break;
+    }
     if (!kh) { pkDem.phieu_loi++; return console.error("[pancake] không tìm thấy khách để ghi phiếu", psid); }
     const r = await fetch(`${PK_API}/${trangId}/page_customers/${kh}/notes?${q}`, {
       method: "POST",
@@ -419,7 +429,7 @@ async function reply(id, customerText, sendMot = sendFb) {
     if (!daGanNhan && typeof t === "string" && t.includes(CHOT_TEXT.slice(4, 20))) {
       daGanNhan = true;
       await ganNhanPancake(id);
-      await ghiPhieuPancake(id, phieuDon(u, null));
+      ghiPhieuPancake(id, phieuDon(u, null));
     }
   };
   const u = user(id);
@@ -493,7 +503,7 @@ async function reply(id, customerText, sendMot = sendFb) {
       u.chotLuc = Date.now(); // bot vẫn trả lời thêm 30 phút rồi mới nhường Sapo
       saveState();
       await ganNhanPancake(id);
-      await ghiPhieuPancake(id, phieuDon(u, luu?.input));
+      ghiPhieuPancake(id, phieuDon(u, luu?.input));
       return console.log("[chốt đơn] khách", id);
     }
     if (!calls.length) {
