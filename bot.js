@@ -420,6 +420,11 @@ async function capNhatSheet() {
 }
 if (process.env.SHEET_URL) { capNhatSheet(); setInterval(capNhatSheet, 2 * 60000); }
 
+// Tin khách chỉ là cảm ơn/ok/like/nhãn dán (được phép không trả lời). Có số (SĐT), ảnh, câu dài hay chữ khác → phải trả lời
+const chiCamOn = (s) => {
+  const t = String(s).replace(/\[Khách gửi nhãn dán[^\]]*\]/g, "").trim();
+  return !t || (t.length <= 25 && !/\d/.test(t) && (!/\p{L}/u.test(t) || /ok|oke|cảm ơn|cám ơn|cam on|thank|tks|vâng|ừ|uk|dạ|được|đc/i.test(t)));
+};
 async function reply(id, customerText, sendMot = sendFb) {
   // Kịch bản có thể tách một lượt thành nhiều tin bằng [TÁCH TIN] (ví dụ: lời chào rồi câu trả lời riêng)
   let daGanNhan = false; // nhánh chốt đơn tự gắn (kèm luu_don); các nhánh khác lỡ nói câu chốt thì gắn ở đây
@@ -508,7 +513,15 @@ async function reply(id, customerText, sendMot = sendFb) {
     }
     if (!calls.length) {
       saveState();
-      if (text.includes("[KHÔNG TRẢ LỜI]")) return console.log("[im lặng] khách", id, "chỉ cảm ơn/like");
+      if (text.includes("[KHÔNG TRẢ LỜI]")) {
+        // Bot từng im nhầm khi khách đặt hàng, gửi địa chỉ, SĐT (25/11/2026): nhắc trả lời
+        if (step < 4 && !chiCamOn(customerText)) {
+          console.log("[không im lặng] khách", id);
+          messages.push({ role: "user", content: "(Hệ thống, khách không thấy tin này) Tin vừa rồi của khách KHÔNG phải chỉ cảm ơn/like: khách đang hỏi, đặt hàng hoặc gửi SĐT/địa chỉ. Trả lời khách theo kịch bản, không dùng [KHÔNG TRẢ LỜI]." });
+          continue;
+        }
+        return console.log("[im lặng] khách", id, "chỉ cảm ơn/like");
+      }
       if (!text) return baoChuyen(send, id);
       await send(id, text);
       for (const m of cho.splice(0)) await send(id, m);
