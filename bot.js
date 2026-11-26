@@ -522,7 +522,16 @@ async function reply(id, customerText, sendMot = sendFb) {
         }
         return console.log("[im lặng] khách", id, "chỉ cảm ơn/like");
       }
-      if (!text) return baoChuyen(send, id);
+      if (!text) {
+        // AI trả về rỗng (khách cũ "1 ky", 24/11/2026) từng bị chuyển nhân viên nhầm: bắt trả lời lại
+        console.log("[trả lời rỗng] khách", id, res.stop_reason);
+        if (step < 4) {
+          messages.pop(); // bỏ lượt rỗng (API không nhận tin trống)
+          messages.push({ role: "user", content: "(Hệ thống, khách không thấy tin này) Bạn chưa trả lời gì. Trả lời tin vừa rồi của khách theo kịch bản." });
+          continue;
+        }
+        return baoChuyen(send, id);
+      }
       await send(id, text);
       for (const m of cho.splice(0)) await send(id, m);
       return;
