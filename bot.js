@@ -456,7 +456,7 @@ async function reply(id, customerText, sendMot = sendFb) {
   for (let step = 0; step < 5; step++) {
     const res = await client.messages.create({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 4096, // 1024 làm cụt câu trả lời dài (phần suy nghĩ ăn hết), 28/11/2026
       output_config: { effort: "medium" },
       cache_control: { type: "ephemeral" },
       system: u.ctx ? [{ type: "text", text: SYSTEM }, { type: "text", text: u.ctx }] : SYSTEM,
