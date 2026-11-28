@@ -188,7 +188,7 @@ const TOOLS = [
       required: ["sdt", "dia_chi", "noi_dung", ...(CHOT_TU_VIET ? ["loi_chot"] : [])],
       properties: {
         sdt: { type: "string", description: "Số điện thoại người nhận" },
-        dia_chi: { type: "string", description: "Địa chỉ giao hàng đầy đủ" },
+        dia_chi: { type: "string", description: "Chép NGUYÊN VĂN địa chỉ khách gõ (giữ đúng chữ, không thêm/bớt dấu phẩy, không tự tách hay đổi tên xã/huyện/tỉnh, không thêm huyện khách không ghi). Khách gửi địa chỉ qua nhiều tin thì nối các tin lại theo thứ tự." },
         noi_dung: { type: "string", description: "Hàng đã đặt và tổng tiền, ví dụ: 2kg, 180.000đ miễn ship" },
         ...(CHOT_TU_VIET ? { loi_chot: { type: "string", description: "Tin nhắn chốt đơn gửi khách: câu TỔNG ĐƠN theo đúng mẫu trong kịch bản shop (số chiếc, size/loại, tổng tiền). KHÔNG dùng câu \"Dạ! Để em chuẩn bị và gửi luôn ạ.\"" } } : {}),
       },
